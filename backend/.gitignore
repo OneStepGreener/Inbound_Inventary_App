@@ -1,0 +1,113 @@
+# Environment files with sensitive data
+.env
+config.env
+*.env
+
+# But allow template files
+!env.template
+!config.env.example
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Flask
+instance/
+.webassets-cache
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Additional Python tooling and cache directories
+.mypy_cache/
+.ruff_cache/
+.nox/
+.pdm-build/
+.pytype/
+.ipynb_checkpoints/
+*.pyproject-local
+.python-version
+
+# =====================================================
+# Restrict repo to only a few files for GitHub
+# (keep everything locally, but don't track in git)
+# =====================================================
+
+# Ignore everything by default
+*
+
+# But keep these files in the repo
+!.gitignore
+!app.py
+!requirements.txt
+!modelApplicationPath.py
+
+# Additional Python tooling and cache directories
+.mypy_cache/
+.ruff_cache/
+.nox/
+.pdm-build/
+.pytype/
+.ipynb_checkpoints/
+*.pyproject-local
+.python-version

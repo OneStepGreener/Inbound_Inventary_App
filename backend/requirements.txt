@@ -1,0 +1,9 @@
+Flask==2.3.3
+Flask-CORS==4.0.0
+mysql-connector-python==8.1.0
+requests==2.31.0
+python-dateutil==2.8.2
+python-dotenv==1.0.0
+Werkzeug==2.3.7
+svglib==1.5.1
+reportlab==4.0.7
