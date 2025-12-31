@@ -51,12 +51,22 @@ function App() {
     setCurrentScreen('scan');
   };
 
-  const handleWeightSubmit = ({ barcode, weight }) => {
-    // Handle submitted weight here (e.g., API call or local processing)
-    console.log('Weight submitted:', { barcode, weight });
-
-    // After submitting, go back to scan for the next item
-    setCurrentScreen('scan');
+  const handleWeightSubmit = ({ barcode, weight, success, data }) => {
+    // Handle submitted weight response
+    if (success) {
+      console.log('Weight submitted successfully:', {
+        barcode,
+        weight,
+        cycleData: data?.cycle,
+        routeStopData: data?.route_stop,
+      });
+      // After successful submission, go back to scan for the next item
+      setCurrentScreen('scan');
+      setScannedBarcode(null); // Clear scanned barcode
+    } else {
+      console.log('Weight submission failed:', { barcode, weight });
+      // Stay on weight screen if submission failed (user can retry)
+    }
   };
 
   return (

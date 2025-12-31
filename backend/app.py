@@ -14,12 +14,33 @@ import secrets
 import string
 from functools import wraps
 from werkzeug.security import check_password_hash, generate_password_hash
-import threading
-import time
-from dotenv import load_dotenv
+import logging
 
-# Load environment variables from .env file
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def log_request_error(endpoint_name, error, request_data=None):
+    """Helper function to log request errors with full details"""
+    import traceback
+    error_trace = traceback.format_exc()
+    logger.error(f"[{endpoint_name}] Error occurred: {str(error)}")
+    logger.error(f"[{endpoint_name}] Error Type: {type(error).__name__}")
+    if request_data:
+        logger.error(f"[{endpoint_name}] Request Data: {request_data}")
+    logger.error(f"[{endpoint_name}] Full Traceback:\n{error_trace}")
+    print(f"❌ [{endpoint_name}] Error: {str(error)}")
+    print(f"❌ [{endpoint_name}] Error Type: {type(error).__name__}")
+    if request_data:
+        print(f"❌ [{endpoint_name}] Request Data: {request_data}")
+    print(f"❌ [{endpoint_name}] Full Traceback:\n{error_trace}")
 try:
     from PIL import Image
     import io
@@ -34,43 +55,30 @@ app.wsgi_app = PrefixMiddleware(app.wsgi_app, "/aiml/corporatewebsite")  #Baseur
 CORS(app, origins="*", supports_credentials=False)
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)  # 8-hour session
 
-# Database Configuration - Load from environment variables
-app.config["MYSQL_HOST"] = os.getenv("MYSQL_HOST")
-app.config["MYSQL_USER"] = os.getenv("MYSQL_USER")
-app.config["MYSQL_PASSWORD"] = os.getenv("MYSQL_PASSWORD")
-app.config["MYSQL_DB"] = os.getenv("MYSQL_DB")
+app.config["MYSQL_HOST"] = os.getenv("MYSQL_HOST", "1.7.139.173")
+# app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST', '172.16.139.189')
+app.config["MYSQL_USER"] = os.getenv("MYSQL_USER", "OSGCORER")
+app.config["MYSQL_PASSWORD"] = os.getenv("MYSQL_PASSWORD", "OSG@9123")
+# app.config["MYSQL_HOST"] = os.getenv("MYSQL_HOST", "127.0.0.1")
+# app.config["MYSQL_USER"] = os.getenv("MYSQL_USER", "root")
+# app.config["MYSQL_PASSWORD"] = os.getenv("MYSQL_PASSWORD", "OSG@1212")
+app.config["MYSQL_DB"] = os.getenv("MYSQL_DB", "osg_database_testing")
 app.config["MYSQL_PORT"] = int(os.getenv("MYSQL_PORT", 3306))
-
-# Validate required database configuration
-required_db_vars = ["MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DB"]
-missing_vars = [var for var in required_db_vars if not app.config.get(var)]
-if missing_vars:
-    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your .env file.")
-
-# TCI API Configuration for Driver License Data - Load from environment variables
-TCI_API_BASE_URL = os.getenv("TCI_API_BASE_URL", "https://api.tcil.in/WhatsAppAPILive/api/TcilApi")
-TCI_USERID = os.getenv("TCI_USERID")
-TCI_PASSWORD = os.getenv("TCI_PASSWORD")
-
-# Validate TCI API configuration
-if not TCI_USERID or not TCI_PASSWORD:
-    print("⚠️ Warning: TCI_USERID or TCI_PASSWORD not set in environment variables")
-
-# Gmail SMTP Configuration - Load from environment variables
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() == "true"
-
-# Validate SMTP configuration
-if not SMTP_USERNAME or not SMTP_PASSWORD:
-    print("⚠️ Warning: SMTP_USERNAME or SMTP_PASSWORD not set in environment variables")
-
-# OTP Configuration - Load from environment variables
-OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", 10))
-OTP_LENGTH = int(os.getenv("OTP_LENGTH", 6))
-MAX_OTP_ATTEMPTS = int(os.getenv("MAX_OTP_ATTEMPTS", 10))
+# ==================== END GEOFENCING HELPER FUNCTIONS ====================
+# TCI API Configuration for Driver License Data
+TCI_API_BASE_URL = "https://api.tcil.in/WhatsAppAPILive/api/TcilApi"
+TCI_USERID = "TCICOE_Ulip_01"
+TCI_PASSWORD = "T3c1i6c5o3e1U7l9i6p3H"
+# Gmail SMTP Configuration
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USERNAME = "dev1@onestepgreener.org"
+SMTP_PASSWORD = "ooti hqvf zwxt rlvr"  # App password
+SMTP_USE_TLS = True
+# OTP Configuration
+OTP_EXPIRY_MINUTES = 10  # OTP expires after 10 minutes
+OTP_LENGTH = 6  # 6-digit OTP
+MAX_OTP_ATTEMPTS = 10  # Maximum attempts per email per hour
 # Database Configuration
 
 def get_db_connection():
@@ -107,9 +115,12 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False):
     try:
         connection = get_db_connection()
         if not connection:
+            error_msg = "Could not establish database connection"
+            print(f"❌ [execute_query] {error_msg}")
+            print(f"❌ [execute_query] Config - Host: {app.config['MYSQL_HOST']}, Port: {app.config['MYSQL_PORT']}, DB: {app.config['MYSQL_DB']}, User: {app.config['MYSQL_USER']}")
             return {
                 "success": False,
-                "error": "Could not establish database connection",
+                "error": error_msg,
             }
         cursor = connection.cursor(dictionary=True, buffered=True)
         cursor.execute(query, params)
@@ -134,57 +145,59 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False):
     except Error as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"❌ Database error in execute_query: {e}")
-        print(f"Query: {query}")
-        print(f"Params: {params}")
-        print(f"Traceback: {error_trace}")
+        print(f"❌ [execute_query] MySQL Error: {e}")
+        print(f"❌ [execute_query] Error Code: {e.errno if hasattr(e, 'errno') else 'N/A'}")
+        print(f"❌ [execute_query] SQL State: {e.sqlstate if hasattr(e, 'sqlstate') else 'N/A'}")
+        print(f"❌ [execute_query] Query: {query}")
+        print(f"❌ [execute_query] Params: {params}")
+        print(f"❌ [execute_query] Full Traceback:\n{error_trace}")
         if connection:
             connection.rollback()
+            print(f"❌ [execute_query] Transaction rolled back")
         return {"success": False, "error": f"Database error: {e}"}
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"❌ Unexpected error in execute_query: {e}")
-        print(f"Query: {query}")
-        print(f"Params: {params}")
-        print(f"Traceback: {error_trace}")
+        print(f"❌ [execute_query] Unexpected error: {e}")
+        print(f"❌ [execute_query] Error Type: {type(e).__name__}")
+        print(f"❌ [execute_query] Query: {query}")
+        print(f"❌ [execute_query] Params: {params}")
+        print(f"❌ [execute_query] Full Traceback:\n{error_trace}")
         if connection:
             connection.rollback()
+            print(f"❌ [execute_query] Transaction rolled back")
         return {"success": False, "error": f"Unexpected error: {e}"}
     finally:
-        # Always close cursor first
         if cursor:
-            try:
-                cursor.close()
-            except Exception as e:
-                print(f"Error closing cursor: {e}")
-        # Always close connection
-        if connection:
-            try:
-                if connection.is_connected():
-                    connection.close()
-            except Exception as e:
-                print(f"Error closing connection: {e}")
+            cursor.close()
+        if connection and connection.is_connected():
+            connection.close()
 
 # Multi-Pickup Route Management Functions
 def create_multi_pickup_assignment(route_date, driver_dl, vehicle_no):
     """Create a new multi-pickup assignment"""
     try:
+        print(f"🔍 [create_multi_pickup_assignment] Creating assignment - route_date: {route_date}, driver_dl: {driver_dl}, vehicle_no: {vehicle_no}")
         # Ensure route_date is in correct format (YYYY-MM-DD)
         try:
             date_obj = datetime.strptime(route_date, "%Y-%m-%d")
             formatted_route_date = date_obj.strftime("%Y-%m-%d")
-        except ValueError:
+        except ValueError as ve:
             # If invalid date, use today
+            print(f"⚠️ [create_multi_pickup_assignment] Invalid date format '{route_date}', using today's date. Error: {ve}")
             formatted_route_date = datetime.now().strftime("%Y-%m-%d")
+        
         insert_sql = """
         INSERT INTO b2b_route_assignments (
             route_date, driver_dl, vehicle_no, status, created_at, updated_at
         ) VALUES (%s, %s, %s, %s, NOW(), NOW())
         """
         params = (formatted_route_date, driver_dl, vehicle_no, "pending")
+        print(f"🔍 [create_multi_pickup_assignment] Executing INSERT with params: {params}")
         result = execute_query(insert_sql, params)
+        
         if result.get("success"):
+            print(f"✅ [create_multi_pickup_assignment] Assignment created successfully")
             # Get the route_id
             get_id_sql = "SELECT route_id FROM b2b_route_assignments WHERE driver_dl = %s AND vehicle_no = %s AND DATE(route_date) = %s ORDER BY route_id DESC LIMIT 1"
             id_result = execute_query(
@@ -193,13 +206,26 @@ def create_multi_pickup_assignment(route_date, driver_dl, vehicle_no):
                 fetch_one=True,
             )
             if id_result.get("success"):
+                route_id = id_result.get("data", {}).get("route_id")
+                print(f"✅ [create_multi_pickup_assignment] Retrieved route_id: {route_id}")
                 return {
                     "success": True,
-                    "route_id": id_result.get("data", {}).get("route_id"),
+                    "route_id": route_id,
                 }
-        return {"success": False, "error": result.get("error")}
+            else:
+                print(f"⚠️ [create_multi_pickup_assignment] Failed to retrieve route_id: {id_result.get('error')}")
+        else:
+            print(f"❌ [create_multi_pickup_assignment] Failed to create assignment: {result.get('error')}")
+        
+        return {"success": False, "error": result.get("error", "Unknown error")}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        error_msg = f"Exception in create_multi_pickup_assignment: {str(e)}"
+        log_request_error("create_multi_pickup_assignment", e, {
+            "route_date": route_date,
+            "driver_dl": driver_dl,
+            "vehicle_no": vehicle_no
+        })
+        return {"success": False, "error": error_msg}
 def add_pickup_stop(
     route_id, sequence, latitude, longitude, branch_name, address, contact, branch_code
 ):
@@ -713,7 +739,7 @@ def update_assignment_status(route_id, status):
 def handle_signature_upload(signature_data, signature_file=None):
     """
     Handle POC signature upload - supports both file upload and base64 string.
-    Automatically converts SVG to PNG for better compatibility with SOAP service.
+    Automatically converts SVG to PNG for better compatibility.
     Returns the file path (URL) if successful, None otherwise.
     """
     try:
@@ -721,17 +747,17 @@ def handle_signature_upload(signature_data, signature_file=None):
         if signature_file and signature_file.filename:
             upload_result = upload_and_get_path(signature_file)
             if upload_result["status"] == "success":
-                print(f"[handle_signature_upload] File uploaded successfully: {upload_result['file_path']}")
+                print(f"✅ [handle_signature_upload] File uploaded successfully: {upload_result['file_path']}")
                 return upload_result["file_path"]
             else:
-                print(f"[handle_signature_upload] File upload failed: {upload_result.get('message', 'Unknown error')}")
+                print(f"⚠️ [handle_signature_upload] File upload failed: {upload_result['message']}")
                 return None
         
         # If signature_data is provided as base64 string, convert to file and upload
         if signature_data:
             # Check if it's already a URL/path, return it as is
             if isinstance(signature_data, str) and (signature_data.startswith('http') or signature_data.startswith('/')):
-                print(f"[handle_signature_upload] Signature is already a URL: {signature_data}")
+                print(f"✅ [handle_signature_upload] Signature is already a URL: {signature_data}")
                 return signature_data
             
             # Check if it's base64 encoded (with or without data URI prefix)
@@ -739,134 +765,102 @@ def handle_signature_upload(signature_data, signature_file=None):
                 try:
                     # Extract base64 data and detect image type
                     image_type = None
-                    base64_data = None
-                    
                     if signature_data.startswith('data:image'):
                         # Extract image type and base64 data
                         # Format: data:image/svg+xml;base64,... or data:image/png;base64,...
                         parts = signature_data.split(',')
-                        if len(parts) < 2:
-                            print("[handle_signature_upload] Invalid data URI format")
-                            return None
-                        
-                        header = parts[0]
-                        base64_data = parts[1]
+                        header = parts[0] if len(parts) > 1 else ''
+                        base64_data = parts[1] if len(parts) > 1 else signature_data
                         
                         # Detect image type from header
-                        if 'svg+xml' in header or 'svg' in header:
+                        if 'svg+xml' in header:
                             image_type = 'svg'
                         elif 'png' in header:
                             image_type = 'png'
                         elif 'jpeg' in header or 'jpg' in header:
                             image_type = 'jpeg'
-                        else:
-                            image_type = 'png'  # Default fallback
                     else:
                         # Assume raw base64 - try to detect if it's SVG by checking content
                         base64_data = signature_data
                         try:
-                            decoded = base64.b64decode(base64_data, validate=True)
-                            # Check first 500 bytes for SVG markers
-                            preview = decoded[:500] if len(decoded) > 500 else decoded
-                            if preview.startswith(b'<?xml') or preview.startswith(b'<svg') or b'<svg' in preview:
+                            decoded = base64.b64decode(base64_data)
+                            if decoded.startswith(b'<?xml') or decoded.startswith(b'<svg') or b'<svg' in decoded[:500]:
                                 image_type = 'svg'
                             else:
                                 image_type = 'png'  # Default to PNG for binary images
-                        except Exception as decode_error:
-                            print(f"[handle_signature_upload] Base64 decode validation failed: {str(decode_error)}")
-                            return None
-                    
-                    if not base64_data:
-                        print("[handle_signature_upload] No base64 data found")
-                        return None
+                        except:
+                            image_type = 'png'  # Default fallback
                     
                     # Decode base64 to binary
-                    try:
-                        image_data = base64.b64decode(base64_data, validate=True)
-                        if len(image_data) == 0:
-                            print("[handle_signature_upload] Decoded image data is empty")
-                            return None
-                    except Exception as decode_error:
-                        print(f"[handle_signature_upload] Base64 decode failed: {str(decode_error)}")
-                        return None
+                    image_data = base64.b64decode(base64_data)
                     
-                    # Convert SVG to PNG if needed - REQUIRED for SOAP service compatibility
+                    # Convert SVG to PNG if needed
                     final_image_data = image_data
                     filename = "poc_signature.png"
-                    conversion_success = False
                     
                     if image_type == 'svg':
-                        print("[handle_signature_upload] Converting SVG to PNG...")
-                        
-                        # Method 1: Try cairosvg (most reliable)
                         try:
-                            import cairosvg
-                            final_image_data = cairosvg.svg2png(bytestring=image_data)
-                            if final_image_data and len(final_image_data) > 0:
-                                print("[handle_signature_upload] SVG converted to PNG using cairosvg")
-                                conversion_success = True
-                            else:
-                                print("[handle_signature_upload] cairosvg conversion returned empty data")
-                        except ImportError:
-                            print("[handle_signature_upload] cairosvg library not available")
-                        except Exception as e:
-                            print(f"[handle_signature_upload] cairosvg conversion failed: {str(e)}")
-                        
-                        # Method 2: Try svglib + reportlab
-                        if not conversion_success:
+                            print("🔄 [handle_signature_upload] Converting SVG to PNG...")
+                            
+                            # Try multiple conversion methods in order of preference
+                            conversion_success = False
+                            
+                            # Method 1: Try cairosvg (most reliable)
                             try:
-                                from svglib.svglib import svg2rlg
-                                from reportlab.graphics import renderPM
-                                import io as io_module
-                                
-                                drawing = svg2rlg(io_module.BytesIO(image_data))
-                                if drawing:
+                                import cairosvg
+                                final_image_data = cairosvg.svg2png(bytestring=image_data)
+                                print("✅ [handle_signature_upload] SVG converted to PNG using cairosvg")
+                                conversion_success = True
+                            except ImportError:
+                                pass  # Try next method
+                            except Exception as e:
+                                print(f"⚠️ [handle_signature_upload] cairosvg conversion failed: {str(e)}")
+                                pass  # Try next method
+                            
+                            # Method 2: Try svglib + reportlab
+                            if not conversion_success:
+                                try:
+                                    from svglib.svglib import svg2rlg
+                                    from reportlab.graphics import renderPM
+                                    import io as io_module
+                                    
+                                    drawing = svg2rlg(io_module.BytesIO(image_data))
                                     png_buffer = io_module.BytesIO()
                                     renderPM.drawToFile(drawing, png_buffer, fmt='PNG')
                                     final_image_data = png_buffer.getvalue()
-                                    if final_image_data and len(final_image_data) > 0:
-                                        print("[handle_signature_upload] SVG converted to PNG using svglib+reportlab")
-                                        conversion_success = True
-                                    else:
-                                        print("[handle_signature_upload] svglib conversion returned empty data")
-                                else:
-                                    print("[handle_signature_upload] svglib failed to parse SVG")
-                            except ImportError:
-                                print("[handle_signature_upload] svglib library not available")
-                            except Exception as e:
-                                print(f"[handle_signature_upload] svglib conversion failed: {str(e)}")
-                        
-                        # If conversion failed, return error - don't upload SVG
-                        if not conversion_success:
-                            error_msg = "SVG to PNG conversion failed. Please install cairosvg or svglib library."
-                            print(f"[handle_signature_upload] ERROR: {error_msg}")
-                            return None
-                    
-                    # Validate converted image data
-                    if not final_image_data or len(final_image_data) == 0:
-                        print("[handle_signature_upload] Final image data is empty after processing")
-                        return None
-                    
-                    # Create proper file-like object for SOAP upload
-                    class SignatureFileWrapper:
-                        """File-like wrapper for signature data that properly handles multiple read() calls"""
-                        def __init__(self, file_data, filename):
-                            if isinstance(file_data, io.BytesIO):
-                                self._data = file_data.getvalue()
-                            elif isinstance(file_data, bytes):
-                                self._data = file_data
-                            else:
-                                raise ValueError("file_data must be bytes or BytesIO")
+                                    print("✅ [handle_signature_upload] SVG converted to PNG using svglib+reportlab")
+                                    conversion_success = True
+                                except ImportError:
+                                    pass  # Try next method
+                                except Exception as e:
+                                    print(f"⚠️ [handle_signature_upload] svglib conversion failed: {str(e)}")
+                                    pass  # Try next method
                             
+                            # Method 3: If conversion libraries not available, upload as SVG
+                            # The SOAP service should handle SVG files
+                            if not conversion_success:
+                                print("⚠️ [handle_signature_upload] SVG conversion libraries not available (cairosvg or svglib).")
+                                print("⚠️ [handle_signature_upload] Uploading as SVG - SOAP service will handle it.")
+                                filename = "poc_signature.svg"
+                                
+                        except Exception as svg_error:
+                            print(f"⚠️ [handle_signature_upload] SVG conversion error: {str(svg_error)}")
+                            print("⚠️ [handle_signature_upload] Uploading as SVG...")
+                            filename = "poc_signature.svg"
+                    
+                    # Create file-like object with filename for SOAP upload
+                    image_bytes = io.BytesIO(final_image_data)
+                    
+                    class FileWrapper:
+                        def __init__(self, file_data, filename):
+                            self.file_data = file_data
                             self.filename = filename
                             self._position = 0
+                            # Store the data length for seek operations
+                            self._data = file_data.getvalue()
                             self._size = len(self._data)
                         
                         def read(self, size=-1):
-                            """Read data from the file, supporting multiple calls"""
-                            if self._position >= self._size:
-                                return b''
-                            
                             if size == -1:
                                 data = self._data[self._position:]
                                 self._position = self._size
@@ -877,72 +871,53 @@ def handle_signature_upload(signature_data, signature_file=None):
                             return data
                         
                         def seek(self, pos, whence=0):
-                            """Seek to position in file"""
-                            if whence == 0:  # Absolute position
+                            if whence == 0:
                                 self._position = max(0, min(pos, self._size))
-                            elif whence == 1:  # Relative to current position
+                            elif whence == 1:
                                 self._position = max(0, min(self._position + pos, self._size))
-                            elif whence == 2:  # Relative to end
+                            elif whence == 2:
                                 self._position = max(0, min(self._size + pos, self._size))
                             return self._position
                         
                         def tell(self):
-                            """Get current position in file"""
                             return self._position
                         
                         def __len__(self):
-                            """Get file size"""
                             return self._size
-                        
-                        def close(self):
-                            """Close file (no-op for in-memory data)"""
-                            pass
                     
-                    try:
-                        file_wrapper = SignatureFileWrapper(final_image_data, filename)
-                        print(f"[handle_signature_upload] Uploading signature as {filename} (size: {len(file_wrapper)} bytes)")
-                        
-                        # Verify the file wrapper has data
-                        if len(file_wrapper) == 0:
-                            print("[handle_signature_upload] File wrapper is empty, cannot upload")
-                            return None
-                        
-                        upload_result = upload_and_get_path(file_wrapper)
-                        
-                        if upload_result["status"] == "success":
-                            print(f"[handle_signature_upload] Signature uploaded successfully: {upload_result['file_path']}")
-                            return upload_result["file_path"]
-                        else:
-                            error_msg = upload_result.get('message', 'Unknown upload error')
-                            print(f"[handle_signature_upload] Upload failed: {error_msg}")
-                            return None
-                            
-                    except Exception as wrapper_error:
-                        print(f"[handle_signature_upload] File wrapper creation/upload failed: {str(wrapper_error)}")
-                        import traceback
-                        traceback.print_exc()
+                    file_wrapper = FileWrapper(image_bytes, filename)
+                    print(f"📤 [handle_signature_upload] Uploading signature as {filename} (size: {len(file_wrapper)} bytes)...")
+                    
+                    # Verify the file wrapper has data
+                    if len(file_wrapper) == 0:
+                        print("❌ [handle_signature_upload] File wrapper is empty! Cannot upload.")
+                        return None
+                    
+                    upload_result = upload_and_get_path(file_wrapper)
+                    
+                    if upload_result["status"] == "success":
+                        print(f"✅ [handle_signature_upload] Signature uploaded successfully: {upload_result['file_path']}")
+                        return upload_result["file_path"]
+                    else:
+                        print(f"❌ [handle_signature_upload] Upload failed: {upload_result.get('message', 'Unknown error')}")
                         return None
                         
                 except Exception as e:
-                    print(f"[handle_signature_upload] Base64 conversion/upload failed: {str(e)}")
+                    print(f"⚠️ [handle_signature_upload] Base64 conversion/upload failed: {str(e)}")
                     import traceback
                     traceback.print_exc()
                     return None
         
-        print("[handle_signature_upload] No signature data or file provided")
         return None
     except Exception as e:
-        print(f"[handle_signature_upload] Error handling signature: {str(e)}")
+        print(f"❌ [handle_signature_upload] Error handling signature: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
 
 def upload_and_get_path(file):
     """Upload file through SOAP service and get file path"""
-    if not file:
-        return {"status": "error", "message": "No file provided for upload"}
-    
-    # Hardcoded parameters - should be moved to environment variables
+    # Hardcoded parameters
     awsparam = {
         "CompanyCode": "80",
         "DivisionCode": "80",
@@ -953,30 +928,12 @@ def upload_and_get_path(file):
         "UserBranch": "OSGG",
         "DocDate": datetime.today().strftime("%d-%b-%Y"),
     }
-    
-    # Check file size and read content
-    try:
-        # Reset to beginning
-        if hasattr(file, 'seek'):
-            file.seek(0)
-        
-        # Read file content
-        byte_file = file.read()
-        
-        # Reset again for potential reuse
-        if hasattr(file, 'seek'):
-            file.seek(0)
-        
-        if not byte_file or len(byte_file) == 0:
-            return {"status": "error", "message": "File is empty, cannot upload"}
-        
-        # Validate file size (max 10MB)
-        max_size = 10 * 1024 * 1024  # 10MB
-        if len(byte_file) > max_size:
-            return {"status": "error", "message": f"File size exceeds maximum allowed size of {max_size} bytes"}
-            
-    except Exception as read_error:
-        return {"status": "error", "message": f"Error reading file: {str(read_error)}"}
+    if not file or len(file.read()) == 0:
+        file.seek(0)  # Reset file pointer
+        return {"status": "error", "message": "Please select a file to upload."}
+    file.seek(0)  # Reset file pointer after checking
+    # Convert file to byte array
+    byte_file = file.read()
     # Prepare the SOAP request for file upload
     soap_upload_request = f"""
 <soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' xmlns:tem='http://tempuri.org/'>
@@ -1006,32 +963,16 @@ def upload_and_get_path(file):
         "https://tlog.grouptci.in/WebServices/TCIL_DocumentScan/DocumentScan.asmx"
     )
     try:
-        # Upload file with timeout
-        try:
-            upload_response = requests.post(
-                upload_url, 
-                data=soap_upload_request, 
-                headers=headers,
-                timeout=30  # 30 second timeout
-            )
-        except requests.exceptions.Timeout:
-            return {
-                "status": "error",
-                "message": "Upload request timed out. Please try again.",
-            }
-        except requests.exceptions.RequestException as req_error:
-            return {
-                "status": "error",
-                "message": f"Network error during upload: {str(req_error)}",
-            }
-        
+        # Upload file
+        upload_response = requests.post(
+            upload_url, data=soap_upload_request, headers=headers
+        )
         # Check if upload was successful
         if upload_response.status_code != 200:
             return {
                 "status": "error",
-                "message": f"Upload failed with HTTP status {upload_response.status_code}",
+                "message": f"Upload failed with status {upload_response.status_code}",
             }
-        
         # Parse upload response to check for errors
         try:
             upload_root = ET.fromstring(upload_response.text)
@@ -1041,23 +982,16 @@ def upload_and_get_path(file):
             }
             upload_result = upload_root.find(".//tem:ScanUploadResult", upload_ns)
             if upload_result is not None and upload_result.text:
-                result_text = upload_result.text.strip()
                 if (
-                    "Please Contact With Administrator" in result_text
-                    or "Alert" in result_text
-                    or "Error" in result_text
-                    or "Failed" in result_text
+                    "Please Contact With Administrator" in upload_result.text
+                    or "Alert" in upload_result.text
                 ):
                     return {
                         "status": "error",
-                        "message": f"SOAP Service Error: {result_text}",
+                        "message": f"SOAP Service Error: {upload_result.text}",
                     }
-        except ET.ParseError as parse_error:
-            print(f"[upload_and_get_path] XML parse error in upload response: {str(parse_error)}")
-            # Continue to try retrieving file path anyway
-        except Exception as parse_error:
-            print(f"[upload_and_get_path] Error parsing upload response: {str(parse_error)}")
-            # Continue to try retrieving file path anyway
+        except:
+            pass  # Continue if we can't parse the response
         # SOAP request to retrieve the file path
         soap_retrieve_request = f"""
 <soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' xmlns:tem='http://tempuri.org/'>
@@ -1079,31 +1013,9 @@ def upload_and_get_path(file):
             "Content-Type": "text/xml",
             "SOAPAction": "http://tempuri.org/ShowScanUploadDoc",
         }
-        # Retrieve file path with timeout
-        try:
-            retrieve_response = requests.post(
-                upload_url, 
-                data=soap_retrieve_request, 
-                headers=retrieve_headers,
-                timeout=30  # 30 second timeout
-            )
-        except requests.exceptions.Timeout:
-            return {
-                "status": "error",
-                "message": "Retrieve file path request timed out. Please try again.",
-            }
-        except requests.exceptions.RequestException as req_error:
-            return {
-                "status": "error",
-                "message": f"Network error retrieving file path: {str(req_error)}",
-            }
-        
-        if retrieve_response.status_code != 200:
-            return {
-                "status": "error",
-                "message": f"Retrieve file path failed with HTTP status {retrieve_response.status_code}",
-            }
-        
+        retrieve_response = requests.post(
+            upload_url, data=soap_retrieve_request, headers=retrieve_headers
+        )
         # Parse XML to extract file path
         try:
             root = ET.fromstring(retrieve_response.text)
@@ -1113,42 +1025,20 @@ def upload_and_get_path(file):
             }
             url_element = root.find(".//tem:ShowScanUploadDocResult", ns)
             if url_element is not None and url_element.text:
-                file_path = url_element.text.strip()
-                if file_path:
-                    return {"status": "success", "file_path": file_path}
-            
-            # Try alternative element search without namespace
-            alt_element = root.find(".//ShowScanUploadDocResult")
-            if alt_element is not None and alt_element.text:
-                file_path = alt_element.text.strip()
-                if file_path:
-                    return {"status": "success", "file_path": file_path}
-            
-            return {
-                "status": "error",
-                "message": "File path not found in SOAP response. Upload may have failed.",
-            }
-        except ET.ParseError as parse_error:
-            print(f"[upload_and_get_path] XML parsing error: {str(parse_error)}")
-            print(f"[upload_and_get_path] Response text: {retrieve_response.text[:500]}")
-            return {
-                "status": "error", 
-                "message": f"XML parsing error while retrieving file path: {str(parse_error)}"
-            }
-        except Exception as parse_error:
-            print(f"[upload_and_get_path] Error parsing retrieve response: {str(parse_error)}")
-            return {
-                "status": "error",
-                "message": f"Error parsing SOAP response: {str(parse_error)}",
-            }
+                return {"status": "success", "file_path": url_element.text.strip()}
+            else:
+                # Try alternative element search
+                alt_element = root.find(".//ShowScanUploadDocResult")
+                if alt_element is not None and alt_element.text:
+                    return {"status": "success", "file_path": alt_element.text.strip()}
+                return {
+                    "status": "error",
+                    "message": "Error extracting file path from SOAP response.",
+                }
+        except ET.ParseError as e:
+            return {"status": "error", "message": f"XML parsing error: {str(e)}"}
     except Exception as e:
-        print(f"[upload_and_get_path] Unexpected error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "status": "error", 
-            "message": f"Upload failed: {str(e)}"
-        }
+        return {"status": "error", "message": f"Upload failed: {str(e)}"}
 def calculate_pickup_dates(frequency, selected_days, pickup_count=15):
     """Calculate pickup dates based on frequency and selected days for next N pickup occurrences"""
     pickup_dates = []
@@ -1394,22 +1284,8 @@ def cleanup_expired_tokens():
     except Exception as e:
         print(f"⚠️ Error cleaning up expired tokens: {str(e)}")
 
-def periodic_token_cleanup():
-    """Periodically clean up expired tokens every hour"""
-    while True:
-        try:
-            time.sleep(3600)  # Run every hour
-            cleanup_expired_tokens()
-        except Exception as e:
-            print(f"⚠️ Error in periodic token cleanup: {str(e)}")
-
 # Load tokens on module import (server startup)
 load_tokens_from_file()
-
-# Start cleanup thread in background (daemon thread)
-cleanup_thread = threading.Thread(target=periodic_token_cleanup, daemon=True)
-cleanup_thread.start()
-print("✅ Started periodic token cleanup thread")
 
 def generate_session_token(
     vehicle_no, dl_no, pickup_id=None, branch_code=None, route_id=None
@@ -1470,10 +1346,6 @@ def generate_session_token(
 def validate_token(token):
     """Validate session token"""
     try:
-        # Cleanup expired tokens periodically (every 100th validation to reduce overhead)
-        if len(active_tokens) > 0 and hash(token) % 100 == 0:
-            cleanup_expired_tokens()
-        
         if not token:
             print(f"⚠️ Token validation failed: No token provided")
             return False, "Invalid token. Please login again."
@@ -1481,16 +1353,12 @@ def validate_token(token):
             print(f"⚠️ Token validation failed: Token '{token[:10]}...' not found in active_tokens (total tokens: {len(active_tokens)})")
             return False, "Invalid token. Session may have expired or backend was restarted. Please login again."
         token_data = active_tokens[token]
-        
-        # Check if token expired (with 5 minute grace period for clock skew)
-        expires_at = token_data["expires_at"]
-        grace_period = timedelta(minutes=5)
-        if datetime.now() > (expires_at + grace_period):
+        # Check if token expired
+        if datetime.now() > token_data["expires_at"]:
             del active_tokens[token]  # Remove expired token
             save_tokens_to_file()  # Save updated tokens
             print(f"⚠️ Token validation failed: Token '{token[:10]}...' has expired")
             return False, "Token expired. Please login again."
-        
         # Update last activity
         token_data["app_state"]["last_activity"] = datetime.now().isoformat()
         # Periodically save tokens (every 10th validation to reduce file I/O)
@@ -1554,839 +1422,6 @@ def require_multi_pickup_auth(f):
             ), 500
     return decorated_function
 
-def require_auth(f):
-    """Decorator to require valid token authentication (works for any session type)"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        try:
-            # Get token from header
-            auth_header = request.headers.get("Authorization")
-            if not auth_header:
-                return jsonify(
-                    {"status": "error", "message": "No authorization token provided"}
-                ), 401
-            # Remove 'Bearer ' prefix if present
-            token = (
-                auth_header.replace("Bearer ", "")
-                if auth_header.startswith("Bearer ")
-                else auth_header
-            )
-            # Validate token
-            is_valid, token_data = validate_token(token)
-            if not is_valid:
-                return jsonify({"status": "error", "message": token_data}), 401
-            # Add token data to request context
-            request.token_data = token_data
-            return f(*args, **kwargs)
-        except Exception as e:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": f"Token validation error: {str(e)}",
-                }
-            ), 500
-    return decorated_function
-# Test database connection endpoint
-# Multi-Pickup Route API Endpoints
-@app.route("/multi-pickup/create-assignment", methods=["POST"])
-def create_assignment():
-    """Create a new multi-pickup assignment (without DL - DL posted from vehicle app)"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No data provided"}), 400
-        required_fields = ["route_date", "vehicle_no"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify(
-                    {"status": "error", "message": f"Missing required field: {field}"}
-                ), 400
-        route_date = data["route_date"]
-        vehicle_no = data["vehicle_no"]
-        # Ensure route_date is in correct format (YYYY-MM-DD)
-        try:
-            date_obj = datetime.strptime(route_date, "%Y-%m-%d")
-            formatted_route_date = date_obj.strftime("%Y-%m-%d")
-        except ValueError:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Invalid date format. Use YYYY-MM-DD format.",
-                }
-            ), 400
-        # Create assignment without driver_dl
-        insert_sql = """
-        INSERT INTO b2b_route_assignments (
-            route_date, vehicle_no, status, created_at, updated_at
-        ) VALUES (%s, %s, %s, NOW(), NOW())
-        """
-        params = (formatted_route_date, vehicle_no, "pending")
-        result = execute_query(insert_sql, params)
-        if result.get("success"):
-            # Get the route_id
-            get_id_sql = "SELECT route_id FROM b2b_route_assignments WHERE DATE(route_date) = %s ORDER BY route_id DESC LIMIT 1"
-            id_result = execute_query(
-                get_id_sql, (formatted_route_date,), fetch_one=True
-            )
-            if id_result.get("success"):
-                route_id = id_result.get("data", {}).get("route_id")
-                return jsonify(
-                    {
-                        "status": "success",
-                        "message": "Assignment created successfully (driver will be assigned when vehicle app requests)",
-                        "data": {
-                            "route_id": route_id,
-                            "route_date": formatted_route_date,
-                            "vehicle_no": vehicle_no,
-                            "driver_dl": None,
-                            "status": "pending",
-                        },
-                    }
-                )
-        return jsonify(
-            {
-                "status": "error",
-                "message": "Failed to create assignment",
-                "error": result.get("error"),
-            }
-        ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error creating assignment: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/assign-driver", methods=["POST"])
-def assign_driver():
-    """Assign driver to an assignment (called from vehicle app)"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No data provided"}), 400
-        required_fields = ["route_id", "driver_dl"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify(
-                    {"status": "error", "message": f"Missing required field: {field}"}
-                ), 400
-        route_id = data["route_id"]
-        driver_dl = data["driver_dl"]
-        # Update assignment with driver
-        update_sql = """
-        UPDATE b2b_route_assignments 
-        SET driver_dl = %s, updated_at = NOW()
-        WHERE route_id = %s
-        """
-        result = execute_query(update_sql, (driver_dl, route_id))
-        if result.get("success"):
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Driver assigned successfully",
-                    "data": {
-                        "route_id": route_id,
-                        "driver_dl": driver_dl,
-                        "status": "assigned",
-                    },
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to assign driver",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error assigning driver: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/add-stop", methods=["POST"])
-def add_stop():
-    """Add a pickup stop to an assignment"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No data provided"}), 400
-        required_fields = [
-            "route_id",
-            "sequence",
-            "latitude",
-            "longitude",
-            "branch_name",
-            "address",
-            "contact",
-            "branch_code",
-        ]
-        for field in required_fields:
-            if field not in data:
-                return jsonify(
-                    {"status": "error", "message": f"Missing required field: {field}"}
-                ), 400
-        route_id = data["route_id"]
-        sequence = data["sequence"]
-        latitude = data["latitude"]
-        longitude = data["longitude"]
-        branch_name = data["branch_name"]
-        address = data["address"]
-        contact = data["contact"]
-        branch_code = data["branch_code"]
-        result = add_pickup_stop(
-            route_id,
-            sequence,
-            latitude,
-            longitude,
-            branch_name,
-            address,
-            contact,
-            branch_code,
-        )
-        if result.get("success"):
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Stop added successfully",
-                    "data": {
-                        "route_id": route_id,
-                        "sequence": sequence,
-                        "branch_name": branch_name,
-                        "branch_code": branch_code,
-                        "status": "pending",
-                    },
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to add stop",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error adding stop: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/assignment/<int:route_id>", methods=["GET"])
-def get_assignment(route_id):
-    """Get assignment details with all stops"""
-    try:
-        result = get_assignment_details(route_id)
-        if result.get("success"):
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Assignment details retrieved successfully",
-                    "data": result.get("data"),
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to retrieve assignment details",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error retrieving assignment: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/start-trip/<int:route_id>", methods=["POST"])
-@require_multi_pickup_auth
-def start_trip(route_id):
-    """Start a multi-pickup trip"""
-    try:
-        result = update_assignment_status(route_id, "in_progress")
-        if result.get("success"):
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Trip started successfully",
-                    "data": {"route_id": route_id, "status": "in_progress"},
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to start trip",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error starting trip: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/start-stop/<int:stop_id>", methods=["POST"])
-@require_multi_pickup_auth
-def start_stop(stop_id):
-    """Start pickup at a specific stop"""
-    try:
-        result = update_stop_status(stop_id, "in_progress")
-        if result.get("success"):
-            # Note: branch_pickup_frequency status is automatically updated by update_stop_status()
-            # when status changes to "in_progress" - no manual update needed
-            
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Stop started successfully",
-                    "data": {"stop_id": stop_id, "status": "in_progress"},
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to start stop",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error starting stop: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/complete-stop/<int:stop_id>", methods=["POST"])
-@require_multi_pickup_auth
-def complete_stop(stop_id):
-    """Complete pickup at a specific stop with photo and receipt support"""
-    try:
-        # Handle both JSON data and form data for compatibility
-        if request.content_type and "multipart/form-data" in request.content_type:
-            # Form data (with file uploads)
-            weight = request.form.get("weight")
-            remark = request.form.get("remark")
-        else:
-            # JSON data
-            data = request.get_json() or {}
-            weight = data.get("weight")
-            remark = data.get("remark")
-        waste_image_url = None
-        receipt_image_url = None
-        # Handle photo upload if present (following existing pattern)
-        if "photo" in request.files:
-            file = request.files["photo"]
-            if file and file.filename != "":
-                upload_result = upload_and_get_path(file)
-                if upload_result["status"] == "success":
-                    waste_image_url = upload_result["file_path"]
-                else:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"Photo upload failed: {upload_result['message']}",
-                        }
-                    ), 400
-        # Handle receipt upload if present (following existing pattern)
-        if "receipt_image" in request.files:
-            file = request.files["receipt_image"]
-            if file and file.filename != "":
-                upload_result = upload_and_get_path(file)
-                if upload_result["status"] == "success":
-                    receipt_image_url = upload_result["file_path"]
-                else:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"Receipt upload failed: {upload_result['message']}",
-                        }
-                    ), 400
-        
-        # Handle POC details (name, designation, signature)
-        poc_name = None
-        poc_designation = None
-        poc_signature_url = None
-        
-        if request.content_type and "multipart/form-data" in request.content_type:
-            poc_name = request.form.get("poc_name")
-            poc_designation = request.form.get("poc_designation")
-            # Handle signature as file upload
-            if "poc_signature" in request.files:
-                signature_file = request.files["poc_signature"]
-                poc_signature_url = handle_signature_upload(None, signature_file)
-        else:
-            # JSON data
-            poc_name = data.get("poc_name")
-            poc_designation = data.get("poc_designation")
-            poc_signature_data = data.get("poc_signature")
-            # Handle signature as base64 or URL
-            if poc_signature_data:
-                poc_signature_url = handle_signature_upload(poc_signature_data)
-        
-        # Convert weight to float if provided
-        # Handle weight: strip whitespace, remove units (kg, g, etc.), convert to float
-        weight_value = None
-        if weight is not None:
-            weight_str = str(weight).strip()
-            # Only process if weight is not empty after stripping
-            if weight_str:
-                try:
-                    # Remove any units (kg, g, etc.) and whitespace, then convert to float
-                    weight_str_clean = weight_str.lower()
-                    # Remove common weight units (handle "kgs" before "kg" to avoid issues)
-                    weight_str_clean = weight_str_clean.replace("kgs", "").replace("kg", "").replace("g", "").strip()
-                    if weight_str_clean:  # Only convert if there's still a value after stripping
-                        weight_value = round(float(weight_str_clean), 2)  # Round to 2 decimal places for decimal(10,2) column
-                        # Validate weight is positive
-                        if weight_value <= 0:
-                            return jsonify(
-                                {"status": "error", "message": f"Invalid weight: {weight_value} kg. Weight must be greater than 0."}
-                            ), 400
-                        print(f"✅ [complete_stop] Weight parsed: '{weight}' -> {weight_value} kg")
-                    else:
-                        print(f"⚠️ [complete_stop] Weight '{weight}' became empty after removing units")
-                        return jsonify(
-                            {"status": "error", "message": f"Invalid weight format: {weight}. Please provide a numeric value."}
-                        ), 400
-                except (ValueError, TypeError) as e:
-                    print(f"❌ [complete_stop] Error parsing weight '{weight}': {str(e)}")
-                    return jsonify(
-                        {"status": "error", "message": f"Invalid weight format: {weight}. Please provide a numeric value."}
-                    ), 400
-            else:
-                print(f"⚠️ [complete_stop] Weight is empty or whitespace only")
-        else:
-            print(f"⚠️ [complete_stop] No weight provided in request")
-        
-        # Update stop status with all data including POC details
-        result = update_stop_status(
-            stop_id, "completed", weight_value, remark, waste_image_url, receipt_image_url,
-            poc_name, poc_designation, poc_signature_url
-        )
-        if result.get("success"):
-            # Get branch_code and route_date from the route stop to update branch_pickup_frequency
-            get_stop_info_sql = """
-            SELECT rs.branch_code, DATE(ra.route_date) as route_date
-            FROM b2b_route_stops rs
-            JOIN b2b_route_assignments ra ON rs.route_id = ra.route_id
-            WHERE rs.id = %s
-            """
-            stop_info_result = execute_query(get_stop_info_sql, (stop_id,), fetch_one=True)
-            if stop_info_result.get("success") and stop_info_result.get("data"):
-                stop_data = stop_info_result.get("data")
-                branch_code = stop_data.get("branch_code")
-                route_date = stop_data.get("route_date")
-                if branch_code and route_date:
-                    # Update branch_pickup_frequency status to COMPLETED
-                    update_branch_pickup_frequency_status(branch_code, route_date, "completed")
-            
-            response_data = {
-                "stop_id": stop_id,
-                "status": "completed",
-                "pickup_ended_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            # Add optional fields to response
-            if weight_value is not None:
-                response_data["weight"] = weight_value
-            if remark:
-                response_data["remark"] = remark
-            if waste_image_url:
-                response_data["waste_image_url"] = waste_image_url
-            if receipt_image_url:
-                response_data["receipt_image_url"] = receipt_image_url
-            if poc_name:
-                response_data["poc_name"] = poc_name
-            if poc_designation:
-                response_data["poc_designation"] = poc_designation
-            if poc_signature_url:
-                response_data["poc_signature"] = poc_signature_url
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Stop completed successfully",
-                    "data": response_data,
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to complete stop",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error completing stop: {str(e)}"}
-        ), 500
-@app.route(
-    "/multi-pickup/start-stop-by-sequence/<int:route_id>/<int:sequence>",
-    methods=["POST"],
-)
-@require_multi_pickup_auth
-def start_stop_by_sequence(route_id, sequence):
-    """Start pickup at a specific stop using route_id + sequence (with sequential validation)"""
-    try:
-        # Validate sequential pickup
-        validation = validate_sequential_pickup(route_id, sequence, "start")
-        if not validation.get("valid"):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": validation.get("error"),
-                    "next_sequence": validation.get("next_sequence"),
-                    "current_status": validation.get("current_status"),
-                }
-            ), 400
-        result = update_stop_status_by_sequence(route_id, sequence, "in_progress")
-        if result.get("success"):
-            # Note: branch_pickup_frequency status is automatically updated by update_stop_status_by_sequence()
-            # when status changes to "in_progress" - no manual update needed
-            
-            # Get next sequence info for response
-            next_info = get_next_sequence(route_id)
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Stop started successfully",
-                    "data": {
-                        "route_id": route_id,
-                        "sequence": sequence,
-                        "status": "in_progress",
-                        "pickup_started_at": datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),
-                        "next_action": "complete_this_sequence",
-                        "next_sequence_after_completion": next_info.get(
-                            "next_sequence"
-                        ),
-                    },
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to start stop",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error starting stop: {str(e)}"}
-        ), 500
-@app.route(
-    "/multi-pickup/complete-stop-by-sequence/<int:route_id>/<int:sequence>",
-    methods=["POST"],
-)
-@require_multi_pickup_auth
-def complete_stop_by_sequence(route_id, sequence):
-    """Complete pickup at a specific stop using route_id + sequence with sequential validation and file support"""
-    try:
-        # Validate sequential pickup
-        validation = validate_sequential_pickup(route_id, sequence, "complete")
-        if not validation.get("valid"):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": validation.get("error"),
-                    "next_sequence": validation.get("next_sequence"),
-                    "current_status": validation.get("current_status"),
-                }
-            ), 400
-        # Handle both JSON data and form data for compatibility
-        if request.content_type and "multipart/form-data" in request.content_type:
-            # Form data (with file uploads)
-            weight = request.form.get("weight")
-            remark = request.form.get("remark")
-        else:
-            # JSON data
-            data = request.get_json() or {}
-            weight = data.get("weight")
-            remark = data.get("remark")
-        waste_image_url = None
-        receipt_image_url = None
-        # Handle photo upload if present (following existing pattern)
-        if "photo" in request.files:
-            file = request.files["photo"]
-            if file and file.filename != "":
-                upload_result = upload_and_get_path(file)
-                if upload_result["status"] == "success":
-                    waste_image_url = upload_result["file_path"]
-                else:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"Photo upload failed: {upload_result['message']}",
-                        }
-                    ), 400
-        # Handle receipt upload if present (following existing pattern)
-        if "receipt_image" in request.files:
-            file = request.files["receipt_image"]
-            if file and file.filename != "":
-                upload_result = upload_and_get_path(file)
-                if upload_result["status"] == "success":
-                    receipt_image_url = upload_result["file_path"]
-                else:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"Receipt upload failed: {upload_result['message']}",
-                        }
-                    ), 400
-        
-        # Handle POC details (name, designation, signature)
-        poc_name = None
-        poc_designation = None
-        poc_signature_url = None
-        
-        if request.content_type and "multipart/form-data" in request.content_type:
-            poc_name = request.form.get("poc_name")
-            poc_designation = request.form.get("poc_designation")
-            # Handle signature as file upload
-            if "poc_signature" in request.files:
-                signature_file = request.files["poc_signature"]
-                poc_signature_url = handle_signature_upload(None, signature_file)
-        else:
-            # JSON data
-            poc_name = data.get("poc_name")
-            poc_designation = data.get("poc_designation")
-            poc_signature_data = data.get("poc_signature")
-            # Handle signature as base64 or URL
-            if poc_signature_data:
-                poc_signature_url = handle_signature_upload(poc_signature_data)
-        
-        # Convert weight to float if provided
-        # Handle weight: strip whitespace, remove units (kg, g, etc.), convert to float
-        weight_value = None
-        if weight is not None:
-            weight_str = str(weight).strip()
-            # Only process if weight is not empty after stripping
-            if weight_str:
-                try:
-                    # Remove any units (kg, g, etc.) and whitespace, then convert to float
-                    weight_str_clean = weight_str.lower()
-                    # Remove common weight units (handle "kgs" before "kg" to avoid issues)
-                    weight_str_clean = weight_str_clean.replace("kgs", "").replace("kg", "").replace("g", "").strip()
-                    if weight_str_clean:  # Only convert if there's still a value after stripping
-                        weight_value = round(float(weight_str_clean), 2)  # Round to 2 decimal places for decimal(10,2) column
-                        # Validate weight is positive
-                        if weight_value <= 0:
-                            return jsonify(
-                                {"status": "error", "message": f"Invalid weight: {weight_value} kg. Weight must be greater than 0."}
-                            ), 400
-                        print(f"✅ [complete_stop_by_sequence] Weight parsed: '{weight}' -> {weight_value} kg")
-                    else:
-                        print(f"⚠️ [complete_stop_by_sequence] Weight '{weight}' became empty after removing units")
-                        return jsonify(
-                            {"status": "error", "message": f"Invalid weight format: {weight}. Please provide a numeric value."}
-                        ), 400
-                except (ValueError, TypeError) as e:
-                    print(f"❌ [complete_stop_by_sequence] Error parsing weight '{weight}': {str(e)}")
-                    return jsonify(
-                        {"status": "error", "message": f"Invalid weight format: {weight}. Please provide a numeric value."}
-                    ), 400
-            else:
-                print(f"⚠️ [complete_stop_by_sequence] Weight is empty or whitespace only")
-        else:
-            print(f"⚠️ [complete_stop_by_sequence] No weight provided in request")
-        
-        # Update stop status with all data using route_id + sequence including POC details
-        result = update_stop_status_by_sequence(
-            route_id,
-            sequence,
-            "completed",
-            weight_value,
-            remark,
-            waste_image_url,
-            receipt_image_url,
-            poc_name,
-            poc_designation,
-            poc_signature_url,
-        )
-        if result.get("success"):
-            # Get branch_code and route_date from the route stop to update branch_pickup_frequency
-            get_stop_info_sql = """
-            SELECT rs.branch_code, DATE(ra.route_date) as route_date
-            FROM b2b_route_stops rs
-            JOIN b2b_route_assignments ra ON rs.route_id = ra.route_id
-            WHERE rs.route_id = %s AND rs.sequence = %s
-            """
-            stop_info_result = execute_query(get_stop_info_sql, (route_id, sequence), fetch_one=True)
-            if stop_info_result.get("success") and stop_info_result.get("data"):
-                stop_data = stop_info_result.get("data")
-                branch_code = stop_data.get("branch_code")
-                route_date = stop_data.get("route_date")
-                if branch_code and route_date:
-                    # Update branch_pickup_frequency status to COMPLETED
-                    update_branch_pickup_frequency_status(branch_code, route_date, "completed")
-            
-            # Get next sequence info for response
-            next_info = get_next_sequence(route_id)
-            next_sequence = next_info.get("next_sequence")
-            response_data = {
-                "route_id": route_id,
-                "sequence": sequence,
-                "status": "completed",
-                "pickup_ended_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "next_sequence": next_sequence,
-                "route_status": "completed" if next_sequence is None else "in_progress",
-            }
-            # Add optional fields to response
-            if weight_value is not None:
-                response_data["weight"] = weight_value
-            if remark:
-                response_data["remark"] = remark
-            if waste_image_url:
-                response_data["waste_image_url"] = waste_image_url
-            if receipt_image_url:
-                response_data["receipt_image_url"] = receipt_image_url
-            if poc_name:
-                response_data["poc_name"] = poc_name
-            if poc_designation:
-                response_data["poc_designation"] = poc_designation
-            if poc_signature_url:
-                response_data["poc_signature"] = poc_signature_url
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Stop completed successfully"
-                    + (
-                        f". Next sequence: {next_sequence}"
-                        if next_sequence
-                        else ". All sequences completed!"
-                    ),
-                    "data": response_data,
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to complete stop",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error completing stop: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/driver-assignments/<driver_dl>", methods=["GET"])
-def get_driver_assignments(driver_dl):
-    """Get all assignments for a specific driver"""
-    try:
-        sql = """
-        SELECT 
-            mpa.*,
-            COUNT(mps.route_id) as total_stops,
-            COUNT(CASE WHEN mps.status = 'completed' THEN 1 END) as completed_stops
-        FROM b2b_route_assignments mpa
-        LEFT JOIN b2b_route_stops mps ON mpa.route_id = mps.route_id
-        WHERE mpa.driver_dl = %s
-        GROUP BY mpa.route_id
-        ORDER BY mpa.route_date DESC, mpa.created_at DESC
-        """
-        result = execute_query(sql, (driver_dl,), fetch_all=True)
-        if result.get("success"):
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Driver assignments retrieved successfully",
-                    "data": result.get("data", []),
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to retrieve driver assignments",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {
-                "status": "error",
-                "message": f"Error retrieving driver assignments: {str(e)}",
-            }
-        ), 500
-@app.route("/multi-pickup/today-assignment", methods=["POST"])
-def get_today_assignment_post():
-    """Get today's assignment - accepts DL and vehicle_no in POST body"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No data provided"}), 400
-        required_fields = ["driver_dl", "vehicle_no"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify(
-                    {"status": "error", "message": f"Missing required field: {field}"}
-                ), 400
-        driver_dl = data["driver_dl"]
-        vehicle_no = data["vehicle_no"]
-        # Get today's date in YYYY-MM-DD format
-        today_date = datetime.now().strftime("%Y-%m-%d")
-        # Find assignment by vehicle and date (driver_dl can be NULL or match)
-        sql = """
-        SELECT 
-            mpa.*,
-            COUNT(mps.route_id) as total_stops,
-            COUNT(CASE WHEN mps.status = 'completed' THEN 1 END) as completed_stops,
-            COUNT(CASE WHEN mps.status = 'in_progress' THEN 1 END) as in_progress_stops
-        FROM b2b_route_assignments mpa
-        LEFT JOIN b2b_route_stops mps ON mpa.route_id = mps.route_id
-        WHERE mpa.vehicle_no = %s 
-        AND DATE(mpa.route_date) = %s
-        AND (mpa.driver_dl IS NULL OR mpa.driver_dl = '' OR mpa.driver_dl = %s)
-        GROUP BY mpa.route_id
-        ORDER BY mpa.created_at DESC
-        LIMIT 1
-        """
-        result = execute_query(sql, (vehicle_no, today_date, driver_dl), fetch_one=True)
-        if result.get("success") and result.get("data"):
-            assignment_data = result.get("data")
-            route_id = assignment_data["route_id"]
-            # If assignment has no driver assigned, assign this driver
-            if (
-                not assignment_data.get("driver_dl")
-                or assignment_data.get("driver_dl") == ""
-            ):
-                update_sql = """
-                UPDATE b2b_route_assignments 
-                SET driver_dl = %s, updated_at = NOW()
-                WHERE route_id = %s
-                """
-                update_result = execute_query(update_sql, (driver_dl, route_id))
-                if update_result.get("success"):
-                    assignment_data["driver_dl"] = driver_dl
-                    print(f"✅ Driver {driver_dl} assigned to assignment {route_id}")
-                else:
-                    print(f"⚠️ Failed to assign driver: {update_result.get('error')}")
-            # Generate session token for multi-pickup
-            session_token = generate_session_token(
-                vehicle_no=vehicle_no, dl_no=driver_dl, route_id=route_id
-            )
-            if not session_token:
-                return jsonify(
-                    {"status": "error", "message": "Failed to create session token"}
-                ), 500
-            # Get detailed stops for this assignment
-            stops_result = get_assignment_details(route_id)
-            if stops_result.get("success"):
-                assignment_data["stops"] = stops_result.get("data", {}).get("stops", [])
-            # Add session info to response
-            assignment_data["session_token"] = session_token
-            assignment_data["token_expires_in"] = TOKEN_EXPIRY_HOURS * 3600  # 20 hours in seconds
-            assignment_data["session_type"] = "multi_pickup"
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Today's assignment retrieved successfully with session created",
-                    "data": assignment_data,
-                }
-            )
-        else:
-            return jsonify(
-                {"status": "error", "message": "No assignment found for today"}
-            ), 404
-    except Exception as e:
-        return jsonify(
-            {
-                "status": "error",
-                "message": f"Error retrieving today's assignment: {str(e)}",
-            }
-        ), 500
 @app.route("/multi-pickup/session-status", methods=["GET"])
 @require_multi_pickup_auth
 def get_multi_pickup_session_status():
@@ -2674,681 +1709,140 @@ def auto_start_next_sequence():
         return jsonify(
             {"status": "error", "message": f"Error auto-starting sequence: {str(e)}"}
         ), 500
-@app.route("/multi-pickup/auto-complete-current", methods=["POST"])
-@require_multi_pickup_auth
-def auto_complete_current_sequence():
-    """Automatically complete the current in-progress sequence with photo/receipt support"""
-    try:
-        # Get route_id from session token
-        token_data = request.token_data
-        route_id = token_data.get("route_id")
-        if not route_id:
-            return jsonify(
-                {"status": "error", "message": "No assignment found in session"}
-            ), 400
-        # Get current sequence info
-        next_info = get_next_sequence(route_id)
-        if not next_info.get("success"):
-            return jsonify({"status": "error", "message": next_info.get("error")}), 500
-        current_sequence = next_info.get("next_sequence")
-        current_status = next_info.get("status")
-        if current_status == "all_completed":
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "All sequences already completed!",
-                    "data": {
-                        "route_id": route_id,
-                        "action": "complete_trip",
-                        "all_completed": True,
-                    },
-                }
-            )
-        if current_status == "pending":
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": f"Sequence {current_sequence} not started yet. Start it first.",
-                    "data": {
-                        "route_id": route_id,
-                        "current_sequence": current_sequence,
-                        "status": "pending",
-                        "action": "start_sequence",
-                    },
-                }
-            ), 400
-        # Handle form data for file uploads
-        if request.content_type and "multipart/form-data" in request.content_type:
-            weight = request.form.get("weight")
-            remark = request.form.get("remark")
-            contamination_status = request.form.get("contamination_status")
-        else:
-            data = request.get_json() or {}
-            weight = data.get("weight")
-            remark = data.get("remark")
-            contamination_status = data.get("contamination_status")
-        waste_image_url = None
-        receipt_image_url = None
-        # Handle photo upload
-        if "photo" in request.files:
-            file = request.files["photo"]
-            if file and file.filename != "":
-                upload_result = upload_and_get_path(file)
-                if upload_result["status"] == "success":
-                    waste_image_url = upload_result["file_path"]
-                else:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"Photo upload failed: {upload_result['message']}",
-                        }
-                    ), 400
-        # Handle receipt upload
-        if "receipt_image" in request.files:
-            file = request.files["receipt_image"]
-            if file and file.filename != "":
-                upload_result = upload_and_get_path(file)
-                if upload_result["status"] == "success":
-                    receipt_image_url = upload_result["file_path"]
-                else:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"Receipt upload failed: {upload_result['message']}",
-                        }
-                    ), 400
-        
-        # Handle POC details (name, designation, signature)
-        poc_name = None
-        poc_designation = None
-        poc_signature_url = None
-        
-        if request.content_type and "multipart/form-data" in request.content_type:
-            poc_name = request.form.get("poc_name")
-            poc_designation = request.form.get("poc_designation")
-            # Handle signature as file upload
-            if "poc_signature" in request.files:
-                signature_file = request.files["poc_signature"]
-                poc_signature_url = handle_signature_upload(None, signature_file)
-        else:
-            # JSON data
-            poc_name = data.get("poc_name")
-            poc_designation = data.get("poc_designation")
-            poc_signature_data = data.get("poc_signature")
-            # Handle signature as base64 or URL
-            if poc_signature_data:
-                print(f"📥 [auto_complete_current] Received POC signature data (length: {len(poc_signature_data) if poc_signature_data else 0})")
-                poc_signature_url = handle_signature_upload(poc_signature_data)
-                if poc_signature_url:
-                    print(f"✅ [auto_complete_current] POC signature uploaded successfully: {poc_signature_url}")
-                else:
-                    print(f"⚠️ [auto_complete_current] POC signature upload returned None - upload may have failed")
-            else:
-                print(f"⚠️ [auto_complete_current] No poc_signature_data found in request")
-        
-        # Convert weight to float if provided
-        # Handle weight: strip whitespace, remove units (kg, g, etc.), convert to float
-        weight_value = None
-        if weight is not None:
-            weight_str = str(weight).strip()
-            # Only process if weight is not empty after stripping
-            if weight_str:
-                try:
-                    # Remove any units (kg, g, etc.) and whitespace, then convert to float
-                    weight_str_clean = weight_str.lower()
-                    # Remove common weight units (handle "kgs" before "kg" to avoid issues)
-                    weight_str_clean = weight_str_clean.replace("kgs", "").replace("kg", "").replace("g", "").strip()
-                    if weight_str_clean:  # Only convert if there's still a value after stripping
-                        weight_value = round(float(weight_str_clean), 2)  # Round to 2 decimal places for decimal(10,2) column
-                        # Validate weight is positive
-                        if weight_value <= 0:
-                            return jsonify(
-                                {"status": "error", "message": f"Invalid weight: {weight_value} kg. Weight must be greater than 0."}
-                            ), 400
-                        print(f"✅ [auto_complete_current] Weight parsed: '{weight}' -> {weight_value} kg")
-                    else:
-                        print(f"⚠️ [auto_complete_current] Weight '{weight}' became empty after removing units")
-                        return jsonify(
-                            {"status": "error", "message": f"Invalid weight format: {weight}. Please provide a numeric value."}
-                        ), 400
-                except (ValueError, TypeError) as e:
-                    print(f"❌ [auto_complete_current] Error parsing weight '{weight}': {str(e)}")
-                    return jsonify(
-                        {"status": "error", "message": f"Invalid weight format: {weight}. Please provide a numeric value."}
-                    ), 400
-            else:
-                print(f"⚠️ [auto_complete_current] Weight is empty or whitespace only")
-        else:
-            print(f"⚠️ [auto_complete_current] No weight provided in request")
-        
-        # Normalize contamination_status value if provided
-        contaminated_normalized = None
-        if contamination_status is not None:
-            val = str(contamination_status).strip().lower()
-            if val in ["yes", "y", "true", "1"]:
-                contaminated_normalized = "yes"
-            elif val in ["no", "n", "false", "0"]:
-                contaminated_normalized = "no"
-            elif val in [""]:
-                contaminated_normalized = None
-            else:
-                return jsonify(
-                    {
-                        "status": "error",
-                        "message": "Invalid 'contamination_status' value. Use yes/no.",
-                    }
-                ), 400
-        # Complete the sequence
-        # Note: weight_value will be None if not provided, which means weight won't be updated in the database
-        # Weight should only be set when explicitly provided via the API
-        result = update_stop_status_by_sequence(
-            route_id,
-            current_sequence,
-            "completed",
-            weight_value,  # Use parsed weight_value instead of raw weight
-            remark,
-            waste_image_url,
-            receipt_image_url,
-            poc_name,
-            poc_designation,
-            poc_signature_url,
-        )
-        if result.get("success"):
-            # Persist contamination_status flag if provided
-            if contaminated_normalized in ("yes", "no"):
-                try:
-                    update_cont_sql = """
-                    UPDATE b2b_route_stops
-                    SET contamination_status = %s, updated_at = NOW()
-                    WHERE route_id = %s AND sequence = %s
-                    """
-                    execute_query(
-                        update_cont_sql,
-                        (contaminated_normalized, route_id, current_sequence),
-                    )
-                except Exception:
-                    pass
-            # Fetch the updated stop to return authoritative values
-            # Only return weight from b2b_route_stops table (not from est_weight or any other source)
-            stop_fetch_sql = """
-            SELECT route_id, sequence, status, weight, remark, waste_image_url, receipt_image_url,
-                   contamination_status, poc_name, poc_designation, poc_signature,
-                   pickup_started_at, pickup_ended_at, completed_at
-            FROM b2b_route_stops
-            WHERE route_id = %s AND sequence = %s
-            """
-            stop_row = None
-            try:
-                stop_res = execute_query(
-                    stop_fetch_sql, (route_id, current_sequence), fetch_one=True
-                )
-                if stop_res.get("success"):
-                    stop_row = stop_res.get("data")
-                    # Log the weight that was actually saved
-                    if stop_row:
-                        saved_weight = stop_row.get("weight")
-                        print(f"✅ [auto_complete_current] Weight saved in database: {saved_weight} kg for route_id {route_id}, sequence {current_sequence}")
-            except Exception as e:
-                print(f"❌ [auto_complete_current] Error fetching stop data: {str(e)}")
-                stop_row = None
-            # Get next sequence info after completion
-            next_info_after = get_next_sequence(route_id)
-            next_sequence = next_info_after.get("next_sequence")
-            # Build response from DB row if available
-            response_data = {
-                "route_id": route_id,
-                "completed_sequence": current_sequence,
-                "status": "completed",
-                "pickup_ended_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "next_sequence": next_sequence,
-                "all_completed": next_sequence is None,
-            }
-            if stop_row:
-                if stop_row.get("weight") is not None:
-                    response_data["weight"] = float(stop_row.get("weight"))
-                if stop_row.get("remark"):
-                    response_data["remark"] = stop_row.get("remark")
-                if stop_row.get("waste_image_url"):
-                    response_data["waste_image_url"] = stop_row.get("waste_image_url")
-                if stop_row.get("receipt_image_url"):
-                    response_data["receipt_image_url"] = stop_row.get(
-                        "receipt_image_url"
-                    )
-                if stop_row.get("contamination_status") is not None:
-                    response_data["contamination_status"] = stop_row.get(
-                        "contamination_status"
-                    )
-                if stop_row.get("poc_name"):
-                    response_data["poc_name"] = stop_row.get("poc_name")
-                if stop_row.get("poc_designation"):
-                    response_data["poc_designation"] = stop_row.get("poc_designation")
-                if stop_row.get("poc_signature"):
-                    response_data["poc_signature"] = stop_row.get("poc_signature")
-                # also include DB timestamps if present
-                response_data["db_timestamps"] = {
-                    "pickup_started_at": stop_row.get("pickup_started_at"),
-                    "pickup_ended_at_db": stop_row.get("pickup_ended_at"),
-                    "completed_at": stop_row.get("completed_at"),
-                }
-            else:
-                # Fallback to local variables
-                if weight is not None:
-                    response_data["weight"] = weight
-                if remark:
-                    response_data["remark"] = remark
-                if waste_image_url:
-                    response_data["waste_image_url"] = waste_image_url
-                if receipt_image_url:
-                    response_data["receipt_image_url"] = receipt_image_url
-                if contaminated_normalized in ("yes", "no"):
-                    response_data["contamination_status"] = contaminated_normalized
-                if poc_name:
-                    response_data["poc_name"] = poc_name
-                if poc_designation:
-                    response_data["poc_designation"] = poc_designation
-                if poc_signature_url:
-                    response_data["poc_signature"] = poc_signature_url
-            message = f"Sequence {current_sequence} completed successfully"
-            if next_sequence:
-                message += f". Next sequence: {next_sequence}"
-            else:
-                message += ". All sequences completed!"
-            return jsonify(
-                {"status": "success", "message": message, "data": response_data}
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to complete sequence",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error auto-completing sequence: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/current-status", methods=["GET"])
-@require_multi_pickup_auth
-def get_current_pickup_status():
-    """Get current pickup status based on session authentication"""
-    try:
-        # Get route_id from session token
-        token_data = request.token_data
-        route_id = token_data.get("route_id")
-        driver_dl = token_data.get("dl_no")
-        vehicle_no = token_data.get("vehicle_no")
-        if not route_id:
-            return jsonify(
-                {"status": "error", "message": "No assignment found in session"}
-            ), 400
-        # Get assignment details
-        assignment_sql = """
-        SELECT route_id, route_date, status, 
-               trip_started_at, trip_ended_at, created_at
-        FROM b2b_route_assignments 
-        WHERE route_id = %s
-        """
-        assignment_result = execute_query(assignment_sql, (route_id,), fetch_one=True)
-        if not assignment_result.get("success"):
-            return jsonify({"status": "error", "message": "Assignment not found"}), 404
-        assignment_data = assignment_result.get("data")
-        # Get next sequence info
-        next_info = get_next_sequence(route_id)
-        next_sequence = next_info.get("next_sequence")
-        sequence_status = next_info.get("status")
-        # Get progress summary
-        progress_sql = """
-        SELECT 
-            COUNT(*) as total_sequences,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_sequences,
-            SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_sequences,
-            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_sequences
-        FROM b2b_route_stops 
-        WHERE route_id = %s
-        """
-        progress_result = execute_query(progress_sql, (route_id,), fetch_one=True)
-        progress_data = (
-            progress_result.get("data", {}) if progress_result.get("success") else {}
-        )
-        # Determine next action
-        if sequence_status == "all_completed":
-            next_action = "complete_trip"
-            next_endpoint = "/multi-pickup/complete-trip"
-        elif sequence_status == "pending":
-            next_action = "start_next_sequence"
-            next_endpoint = "/multi-pickup/auto-start-next"
-        elif sequence_status == "in_progress":
-            next_action = "complete_current_sequence"
-            next_endpoint = "/multi-pickup/auto-complete-current"
-        else:
-            next_action = "unknown"
-            next_endpoint = None
-        return jsonify(
-            {
-                "status": "success",
-                "message": "Current status retrieved successfully",
-                "data": {
-                    "driver_info": {"driver_dl": driver_dl, "vehicle_no": vehicle_no},
-                    "assignment": {
-                        "route_id": route_id,
-                        "route_date": assignment_data.get("route_date"),
-                        "status": assignment_data.get("status"),
-                        "trip_started_at": assignment_data.get("trip_started_at"),
-                        "created_at": assignment_data.get("created_at"),
-                    },
-                    "progress": {
-                        "total_sequences": progress_data.get("total_sequences", 0),
-                        "completed_sequences": progress_data.get(
-                            "completed_sequences", 0
-                        ),
-                        "in_progress_sequences": progress_data.get(
-                            "in_progress_sequences", 0
-                        ),
-                        "pending_sequences": progress_data.get("pending_sequences", 0),
-                        "completion_percentage": round(
-                            (
-                                progress_data.get("completed_sequences", 0)
-                                / max(progress_data.get("total_sequences", 1), 1)
-                            )
-                            * 100,
-                            1,
-                        ),
-                    },
-                    "current_sequence": {
-                        "next_sequence": next_sequence,
-                        "status": sequence_status,
-                        "all_completed": sequence_status == "all_completed",
-                    },
-                    "next_action": {
-                        "action": next_action,
-                        "endpoint": next_endpoint,
-                        "description": {
-                            "start_next_sequence": f"Start sequence {next_sequence}",
-                            "complete_current_sequence": f"Complete sequence {next_sequence}",
-                            "complete_trip": "Complete the entire trip",
-                            "unknown": "Status unclear",
-                        }.get(next_action, "Unknown action"),
-                    },
-                },
-            }
-        )
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error getting current status: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/auto-start-trip", methods=["POST"])
-@require_multi_pickup_auth
-def auto_start_trip():
-    """Automatically start trip based on session authentication (no manual route_id)"""
-    try:
-        # Get route_id from session token
-        token_data = request.token_data
-        route_id = token_data.get("route_id")
-        if not route_id:
-            return jsonify(
-                {"status": "error", "message": "No assignment found in session"}
-            ), 400
-        # Start the trip
-        result = update_assignment_status(route_id, "in_progress")
-        if result.get("success"):
-            # Get assignment details for response
-            assignment_sql = """
-            SELECT route_id, route_date, driver_dl, vehicle_no, status
-            FROM b2b_route_assignments 
-            WHERE route_id = %s
-            """
-            assignment_result = execute_query(
-                assignment_sql, (route_id,), fetch_one=True
-            )
-            assignment_data = (
-                assignment_result.get("data", {})
-                if assignment_result.get("success")
-                else {}
-            )
-            # Get total sequences count
-            count_sql = "SELECT COUNT(*) as total_sequences FROM b2b_route_stops WHERE route_id = %s"
-            count_result = execute_query(count_sql, (route_id,), fetch_one=True)
-            total_sequences = (
-                count_result.get("data", {}).get("total_sequences", 0)
-                if count_result.get("success")
-                else 0
-            )
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Trip started successfully",
-                    "data": {
-                        "route_id": route_id,
-                        "route_date": assignment_data.get("route_date"),
-                        "driver_dl": assignment_data.get("driver_dl"),
-                        "vehicle_no": assignment_data.get("vehicle_no"),
-                        "status": "in_progress",
-                        "trip_started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "total_sequences": total_sequences,
-                        "next_action": "start_first_sequence",
-                    },
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to start trip",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error starting trip: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/auto-complete-trip", methods=["POST"])
-@require_multi_pickup_auth
-def auto_complete_trip():
-    """Automatically complete trip based on session authentication (no manual route_id)"""
-    try:
-        # Get route_id from session token
-        token_data = request.token_data
-        route_id = token_data.get("route_id")
-        if not route_id:
-            return jsonify(
-                {"status": "error", "message": "No assignment found in session"}
-            ), 400
-        # Check if all sequences are completed
-        next_info = get_next_sequence(route_id)
-        if next_info.get("status") != "all_completed":
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Cannot complete trip. Not all sequences are completed.",
-                    "data": {
-                        "route_id": route_id,
-                        "next_sequence": next_info.get("next_sequence"),
-                        "remaining_sequences": "pending",
-                    },
-                }
-            ), 400
-        # Complete the trip
-        result = update_assignment_status(route_id, "completed")
-        if result.get("success"):
-            # Get final statistics
-            stats_sql = """
-            SELECT 
-                COUNT(*) as total_sequences,
-                SUM(COALESCE(weight, 0)) as total_weight,
-                MIN(pickup_started_at) as first_pickup_time,
-                MAX(pickup_ended_at) as last_pickup_time
-            FROM b2b_route_stops 
-            WHERE route_id = %s AND status = 'completed'
-            """
-            stats_result = execute_query(stats_sql, (route_id,), fetch_one=True)
-            stats_data = (
-                stats_result.get("data", {}) if stats_result.get("success") else {}
-            )
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": "Trip completed successfully!",
-                    "data": {
-                        "route_id": route_id,
-                        "status": "completed",
-                        "trip_ended_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "statistics": {
-                            "total_sequences_completed": stats_data.get(
-                                "total_sequences", 0
-                            ),
-                            "total_weight_collected": float(
-                                stats_data.get("total_weight", 0)
-                            ),
-                            "first_pickup_time": stats_data.get("first_pickup_time"),
-                            "last_pickup_time": stats_data.get("last_pickup_time"),
-                        },
-                    },
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to complete trip",
-                    "error": result.get("error"),
-                }
-            ), 500
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error completing trip: {str(e)}"}
-        ), 500
-@app.route("/multi-pickup/test-setup", methods=["POST"])
-def test_multi_pickup_setup():
-    """Test endpoint to create a complete multi-pickup assignment with stops"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No data provided"}), 400
-        # Create assignment with proper date format (no driver_dl - will be assigned by vehicle app)
-        today_date = datetime.now().strftime("%Y-%m-%d")
-        assignment_data = {
-            "route_date": data.get("route_date", today_date),
-            "driver_dl": None,  # No driver assigned initially
-            "vehicle_no": data.get("vehicle_no", "KA01AB1234"),
-        }
-        # Ensure route_date is in correct format
-        try:
-            # Validate and reformat the date
-            route_date_obj = datetime.strptime(
-                assignment_data["route_date"], "%Y-%m-%d"
-            )
-            assignment_data["route_date"] = route_date_obj.strftime("%Y-%m-%d")
-        except ValueError:
-            assignment_data["route_date"] = today_date
-        # Create assignment without driver (driver will be assigned when they request it)
-        insert_sql = """
-        INSERT INTO b2b_route_assignments (
-            route_date, vehicle_no, status, created_at, updated_at
-        ) VALUES (%s, %s, %s, NOW(), NOW())
-        """
-        params = (
-            assignment_data["route_date"],
-            assignment_data["vehicle_no"],
-            "pending",
-        )
-        assignment_result = execute_query(insert_sql, params)
-        if assignment_result.get("success"):
-            # Get the route_id
-            get_id_sql = "SELECT route_id FROM b2b_route_assignments WHERE DATE(route_date) = %s AND vehicle_no = %s ORDER BY route_id DESC LIMIT 1"
-            id_result = execute_query(
-                get_id_sql,
-                (assignment_data["route_date"], assignment_data["vehicle_no"]),
-                fetch_one=True,
-            )
-            if id_result.get("success"):
-                route_id = id_result.get("data", {}).get("route_id")
-                assignment_data["route_id"] = route_id
-            else:
-                return jsonify(
-                    {"status": "error", "message": "Failed to retrieve assignment ID"}
-                ), 500
-        else:
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "Failed to create assignment",
-                    "error": assignment_result.get("error"),
-                }
-            ), 500
-        route_id = assignment_data["route_id"]
-        # Add sample stops
-        sample_stops = data.get(
-            "stops",
-            [
-                {
-                    "sequence": 1,
-                    "latitude": 12.9716,
-                    "longitude": 77.5946,
-                    "branch_name": "Sample Branch 1",
-                    "address": "123 Main Street, Bangalore",
-                    "contact": "9876543210",
-                    "branch_code": "BR001",
-                },
-                {
-                    "sequence": 2,
-                    "latitude": 12.9756,
-                    "longitude": 77.5986,
-                    "branch_name": "Sample Branch 2",
-                    "address": "456 Park Avenue, Bangalore",
-                    "contact": "9876543211",
-                    "branch_code": "BR002",
-                },
-            ],
-        )
-        added_stops = []
-        for stop in sample_stops:
-            stop_result = add_pickup_stop(
-                route_id,
-                stop["sequence"],
-                stop["latitude"],
-                stop["longitude"],
-                stop["branch_name"],
-                stop["address"],
-                stop["contact"],
-                stop["branch_code"],
-            )
-            if stop_result.get("success"):
-                added_stops.append(
-                    {
-                        "sequence": stop["sequence"],
-                        "branch_name": stop["branch_name"],
-                        "branch_code": stop["branch_code"],
-                        "status": "pending",
-                    }
-                )
-        # Get complete assignment details
-        assignment_details = get_assignment_details(route_id)
-        return jsonify(
-            {
-                "status": "success",
-                "message": "Multi-pickup test setup completed successfully (no driver assigned - will be assigned by vehicle app)",
-                "data": {
-                    "route_id": route_id,
-                    "assignment": {
-                        "route_date": assignment_data["route_date"],
-                        "vehicle_no": assignment_data["vehicle_no"],
-                        "driver_dl": None,  # Will be assigned when driver requests it
-                        "status": "pending",
-                    },
-                    "stops_added": added_stops,
-                    "complete_details": assignment_details.get("data")
-                    if assignment_details.get("success")
-                    else None,
-                },
-            }
-        )
-    except Exception as e:
-        return jsonify(
-            {"status": "error", "message": f"Error in test setup: {str(e)}"}
-        ), 500
 
-# ==================== BARCODE SCANNER API ENDPOINTS ====================
+@app.route("/test/connection", methods=["GET"])
+def test_connection():
+    """
+    Test endpoint to verify frontend-backend connectivity
+    Returns server status and configuration
+    """
+    try:
+        return jsonify({
+            "status": "success",
+            "message": "Backend server is running and accessible",
+            "server_info": {
+                "timestamp": datetime.now().isoformat(),
+                "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "base_url_prefix": "/aiml/corporatewebsite",
+                "cors_enabled": True,
+                "cors_origins": "*",
+            },
+            "api_endpoints": {
+                "test_database": "/test/database",
+                "test_connection": "/test/connection",
+                "scan_barcode": "/barcode/scan",
+                "inbound_weight": "/barcode/inbound/scan-weight",
+            },
+            "database_status": "Check /test/database for details"
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Error in test endpoint: {str(e)}"
+        }), 500
+
+
+@app.route("/test/database", methods=["GET"])
+def test_database_connection():
+    """
+    Test database connection endpoint
+    Returns connection status and database information
+    """
+    try:
+        # Test connection
+        connection = get_db_connection()
+        
+        if not connection:
+            return jsonify({
+                "status": "error",
+                "message": "Failed to establish database connection",
+                "config": {
+                    "host": app.config["MYSQL_HOST"],
+                    "port": app.config["MYSQL_PORT"],
+                    "database": app.config["MYSQL_DB"],
+                    "user": app.config["MYSQL_USER"],
+                    "password_set": bool(app.config["MYSQL_PASSWORD"]),
+                }
+            }), 500
+        
+        # Get database info
+        cursor = connection.cursor(dictionary=True)
+        
+        # Test query
+        cursor.execute("SELECT VERSION() as version, DATABASE() as current_db, NOW() as server_time")
+        db_info = cursor.fetchone()
+        
+        # Get table count
+        cursor.execute("""
+            SELECT COUNT(*) as table_count 
+            FROM information_schema.tables 
+            WHERE table_schema = %s
+        """, (app.config["MYSQL_DB"],))
+        table_info = cursor.fetchone()
+        
+        # Check if key tables exist
+        key_tables = ['pickup_bag_cycle', 'b2b_route_stops', 'barcode_master_table']
+        existing_tables = []
+        for table in key_tables:
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM information_schema.tables 
+                WHERE table_schema = %s AND table_name = %s
+            """, (app.config["MYSQL_DB"], table))
+            result = cursor.fetchone()
+            if result['count'] > 0:
+                existing_tables.append(table)
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            "status": "success",
+            "message": "Database connection successful",
+            "database_info": {
+                "version": db_info.get("version"),
+                "current_database": db_info.get("current_db"),
+                "server_time": str(db_info.get("server_time")),
+                "total_tables": table_info.get("table_count"),
+                "key_tables_found": existing_tables,
+                "key_tables_missing": [t for t in key_tables if t not in existing_tables]
+            },
+            "connection_config": {
+                "host": app.config["MYSQL_HOST"],
+                "port": app.config["MYSQL_PORT"],
+                "database": app.config["MYSQL_DB"],
+                "user": app.config["MYSQL_USER"],
+                "password_set": bool(app.config["MYSQL_PASSWORD"]),
+            }
+        }), 200
+        
+    except Error as e:
+        return jsonify({
+            "status": "error",
+            "message": f"MySQL Error: {str(e)}",
+            "error_type": "MySQL Error",
+            "config": {
+                "host": app.config["MYSQL_HOST"],
+                "port": app.config["MYSQL_PORT"],
+                "database": app.config["MYSQL_DB"],
+                "user": app.config["MYSQL_USER"],
+            }
+        }), 500
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "status": "error",
+            "message": f"Unexpected error: {str(e)}",
+            "error_type": "Exception",
+            "traceback": traceback.format_exc(),
+            "config": {
+                "host": app.config["MYSQL_HOST"],
+                "port": app.config["MYSQL_PORT"],
+                "database": app.config["MYSQL_DB"],
+                "user": app.config["MYSQL_USER"],
+            }
+        }), 500
+
 
 @app.route("/barcode/test", methods=["GET"])
 def test_barcode_endpoint():
@@ -3398,7 +1892,6 @@ def debug_all_routes():
     }), 200
 
 @app.route("/barcode/scan", methods=["POST"])
-@require_auth
 def scan_barcode():
     """
     Scan and validate a barcode
@@ -3501,7 +1994,6 @@ def scan_barcode():
 
 
 @app.route("/barcode/register", methods=["POST"])
-@require_auth
 def register_barcode():
     """
     Register a new barcode in the master table
@@ -3580,7 +2072,6 @@ def register_barcode():
 
 
 @app.route("/barcode/master/list", methods=["GET"])
-@require_auth
 def list_barcode_master():
     """
     List all barcodes from master table with optional filters
@@ -3651,7 +2142,6 @@ def list_barcode_master():
 
 
 @app.route("/barcode/cycle/start", methods=["POST"])
-@require_auth
 def start_pickup_cycle():
     """
     Start a new pickup bag cycle (status: 'picked')
@@ -3702,18 +2192,6 @@ def start_pickup_cycle():
             date_str = datetime.now().strftime("%Y%m%d")
             cycle_id = f"CYCLE_{date_str}_{barcode_id[:8]}"
         
-        # Get route_id from token if available
-        route_id = None
-        try:
-            if hasattr(request, 'token_data') and request.token_data:
-                route_id = request.token_data.get("route_id")
-        except:
-            pass
-        
-        # Also try to get route_id from request data
-        if not route_id:
-            route_id = data.get("route_id")
-        
         # Check if cycle already exists for this barcode
         existing_check = """
             SELECT id FROM pickup_bag_cycle
@@ -3733,12 +2211,12 @@ def start_pickup_cycle():
         # Insert new cycle
         insert_query = """
             INSERT INTO pickup_bag_cycle (
-                cycle_id, barcode_id, branch_code, pickup_weight, route_id,
+                cycle_id, barcode_id, branch_code, pickup_weight,
                 status, picked_at, created_at
-            ) VALUES (%s, %s, %s, %s, %s, 'picked', NOW(), NOW())
+            ) VALUES (%s, %s, %s, %s, 'picked', NOW(), NOW())
         """
         insert_result = execute_query(
-            insert_query, (cycle_id, barcode_id, branch_code, pickup_weight, route_id)
+            insert_query, (cycle_id, barcode_id, branch_code, pickup_weight)
         )
         
         if not insert_result.get("success"):
@@ -3772,7 +2250,6 @@ def start_pickup_cycle():
 
 
 @app.route("/barcode/cycle/<int:cycle_id>/update-status", methods=["POST"])
-@require_auth
 def update_cycle_status(cycle_id):
     """
     Update the status of a pickup bag cycle
@@ -3798,7 +2275,7 @@ def update_cycle_status(cycle_id):
         
         # Get current cycle
         get_query = """
-            SELECT id, cycle_id, barcode_id, route_id, status, picked_at, inbound_at,
+            SELECT id, cycle_id, barcode_id, status, picked_at, inbound_at,
                    sorted_at, completed_at
             FROM pickup_bag_cycle
             WHERE id = %s
@@ -3883,14 +2360,13 @@ def update_cycle_status(cycle_id):
 
 
 @app.route("/barcode/cycle/<int:cycle_id>", methods=["GET"])
-@require_auth
 def get_cycle_details(cycle_id):
     """
     Get details of a specific pickup bag cycle
     """
     try:
         query = """
-            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight, route_id,
+            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight,
                    inbound_weight, status, picked_at, inbound_at, sorted_at,
                    completed_at, created_at
             FROM pickup_bag_cycle
@@ -3936,7 +2412,6 @@ def get_cycle_details(cycle_id):
 
 
 @app.route("/barcode/cycle/list", methods=["GET"])
-@require_auth
 def list_cycles():
     """
     List pickup bag cycles with optional filters
@@ -3946,13 +2421,12 @@ def list_cycles():
         status = request.args.get("status")
         branch_code = request.args.get("branch_code")
         barcode_id = request.args.get("barcode_id")
-        route_id = request.args.get("route_id")
         limit = request.args.get("limit", 100, type=int)
         offset = request.args.get("offset", 0, type=int)
         
         # Build query with filters
         query = """
-            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight, route_id,
+            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight,
                    inbound_weight, status, picked_at, inbound_at, sorted_at,
                    completed_at, created_at
             FROM pickup_bag_cycle
@@ -3971,10 +2445,6 @@ def list_cycles():
         if barcode_id:
             query += " AND barcode_id = %s"
             params.append(barcode_id)
-        
-        if route_id:
-            query += " AND route_id = %s"
-            params.append(route_id)
         
         query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
@@ -4000,9 +2470,6 @@ def list_cycles():
         if barcode_id:
             count_query += " AND barcode_id = %s"
             count_params.append(barcode_id)
-        if route_id:
-            count_query += " AND route_id = %s"
-            count_params.append(route_id)
         
         count_result = execute_query(count_query, tuple(count_params), fetch_one=True)
         total = count_result.get("data", {}).get("total", 0) if count_result.get("success") else 0
@@ -4025,14 +2492,13 @@ def list_cycles():
 
 
 @app.route("/barcode/cycle/by-barcode/<barcode_id>", methods=["GET"])
-@require_auth
 def get_cycles_by_barcode(barcode_id):
     """
     Get all cycles for a specific barcode
     """
     try:
         query = """
-            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight, route_id,
+            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight,
                    inbound_weight, status, picked_at, inbound_at, sorted_at,
                    completed_at, created_at
             FROM pickup_bag_cycle
@@ -4060,7 +2526,6 @@ def get_cycles_by_barcode(barcode_id):
 
 
 @app.route("/barcode/cycle/scan-and-start", methods=["POST"])
-@require_auth
 def scan_and_start_cycle():
     """
     Combined endpoint: Scan barcode and start pickup cycle in one call
@@ -4223,15 +2688,15 @@ def scan_and_start_cycle():
                 print(f"⚠️ [scan_and_start_cycle] Error saving to b2b_route_stops: {str(e)}")
         
         # Start cycle in pickup_bag_cycle
-        print(f"🔍 [scan_and_start_cycle] Attempting to insert cycle: cycle_id={cycle_id}, barcode_id={barcode_id}, branch_code={branch_code}, pickup_weight={pickup_weight}, route_id={route_id}")
+        print(f"🔍 [scan_and_start_cycle] Attempting to insert cycle: cycle_id={cycle_id}, barcode_id={barcode_id}, branch_code={branch_code}, pickup_weight={pickup_weight}")
         insert_query = """
             INSERT INTO pickup_bag_cycle (
-                cycle_id, barcode_id, branch_code, pickup_weight, route_id,
+                cycle_id, barcode_id, branch_code, pickup_weight,
                 status, picked_at, created_at
-            ) VALUES (%s, %s, %s, %s, %s, 'picked', NOW(), NOW())
+            ) VALUES (%s, %s, %s, %s, 'picked', NOW(), NOW())
         """
         insert_result = execute_query(
-            insert_query, (cycle_id, barcode_id, branch_code, pickup_weight, route_id)
+            insert_query, (cycle_id, barcode_id, branch_code, pickup_weight)
         )
         
         if not insert_result.get("success"):
@@ -4257,7 +2722,7 @@ def scan_and_start_cycle():
         
         # Get the created cycle
         get_query = """
-            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight, route_id,
+            SELECT id, cycle_id, barcode_id, branch_code, pickup_weight,
                    inbound_weight, status, picked_at, inbound_at, sorted_at,
                    completed_at, created_at
             FROM pickup_bag_cycle
@@ -4300,12 +2765,12 @@ def scan_and_start_cycle():
         ), 500
 
 
-@app.route("/barcode/cycle/batch-scan-and-start", methods=["POST"])
-@require_auth
-def batch_scan_and_start_cycle():
+@app.route("/barcode/inbound/scan-weight", methods=["POST"])
+def scan_and_record_inbound_weight():
     """
-    Batch endpoint: Process multiple barcodes in one call
-    Accepts array of barcodes with weights and processes all at once
+    Scan barcode and record inbound weight
+    Updates pickup_bag_cycle.inbound_weight and status to 'inbound'
+    Also updates b2b_route_stops.inbound_weight and status to 'inbound' using route_id
     """
     try:
         data = request.get_json()
@@ -4315,327 +2780,186 @@ def batch_scan_and_start_cycle():
             ), 400
         
         # Validate required fields
-        if "barcodes" not in data or not isinstance(data["barcodes"], list):
+        barcode_id = data.get("barcode_id")
+        cycle_id = data.get("cycle_id")
+        inbound_weight = data.get("inbound_weight")
+        
+        if not inbound_weight:
             return jsonify(
-                {"status": "error", "message": "barcodes array is required"}
+                {"status": "error", "message": "inbound_weight is required"}
             ), 400
         
-        if "branch_code" not in data:
+        if not barcode_id and not cycle_id:
             return jsonify(
-                {"status": "error", "message": "branch_code is required"}
+                {"status": "error", "message": "Either barcode_id or cycle_id is required"}
             ), 400
         
-        barcodes = data["barcodes"]
-        branch_code = data["branch_code"]
-        
-        if len(barcodes) == 0:
-            return jsonify(
-                {"status": "error", "message": "barcodes array cannot be empty"}
-            ), 400
-        
-        # Get route_id from token or data
-        route_id = None
+        # Validate and convert inbound_weight to float
         try:
-            if hasattr(request, 'token_data') and request.token_data:
-                route_id = request.token_data.get("route_id")
-        except:
-            pass
-        
-        if not route_id:
-            route_id = data.get("route_id")
-        
-        # Get additional data
-        additionalData = data.get("additionalData", {})
-        branch_name = additionalData.get("branch_name", f"Branch {branch_code}")
-        address = additionalData.get("address", "")
-        contact = additionalData.get("contact", "")
-        latitude = additionalData.get("latitude")
-        longitude = additionalData.get("longitude")
-        
-        # Validate all barcodes first
-        validated_barcodes = []
-        for idx, barcode_item in enumerate(barcodes):
-            if not isinstance(barcode_item, dict):
+            inbound_weight = float(inbound_weight)
+            if inbound_weight <= 0:
                 return jsonify(
-                    {
-                        "status": "error",
-                        "message": f"Barcode at index {idx} must be an object"
-                    }
+                    {"status": "error", "message": "inbound_weight must be a positive number"}
                 ), 400
-            
-            if "barcode_id" not in barcode_item:
-                return jsonify(
-                    {
-                        "status": "error",
-                        "message": f"barcode_id is required for barcode at index {idx}"
-                    }
-                ), 400
-            
-            if "pickup_weight" not in barcode_item:
-                return jsonify(
-                    {
-                        "status": "error",
-                        "message": f"pickup_weight is required for barcode at index {idx}"
-                    }
-                ), 400
-            
-            barcode_id = barcode_item["barcode_id"]
-            pickup_weight = barcode_item["pickup_weight"]
-            
-            # Validate weight
-            try:
-                pickup_weight = float(pickup_weight) if pickup_weight is not None else 0.0
-                if pickup_weight <= 0:
-                    return jsonify(
-                        {
-                            "status": "error",
-                            "message": f"pickup_weight must be greater than 0 for barcode {barcode_id}"
-                        }
-                    ), 400
-            except (ValueError, TypeError):
-                return jsonify(
-                    {
-                        "status": "error",
-                        "message": f"pickup_weight must be a valid number for barcode {barcode_id}"
-                    }
-                ), 400
-            
-            # Check for duplicate barcodes in request
-            if any(b["barcode_id"] == barcode_id for b in validated_barcodes):
-                return jsonify(
-                    {
-                        "status": "error",
-                        "message": f"Duplicate barcode_id in request: {barcode_id}"
-                    }
-                ), 400
-            
-            validated_barcodes.append({
-                "barcode_id": barcode_id,
-                "pickup_weight": pickup_weight,
-                "bagtype": barcode_item.get("bagtype", "B2B")
-            })
+        except (ValueError, TypeError):
+            return jsonify(
+                {"status": "error", "message": "inbound_weight must be a valid number"}
+            ), 400
         
-        # Calculate total weight from all barcodes
-        total_weight = sum(item["pickup_weight"] for item in validated_barcodes)
-        print(f"[batch_scan_and_start] Total weight for all barcodes: {total_weight} kg")
+        print(f"🔍 [scan_and_record_inbound_weight] Request: barcode_id={barcode_id}, cycle_id={cycle_id}, inbound_weight={inbound_weight}")
         
-        # Process each barcode
-        results = []
-        date_str = datetime.now().strftime("%Y%m%d")
-        route_stop_created = False  # Track if route stop was created
-        route_stop_id = None  # Store route stop ID for weight update
+        # Find the pickup_bag_cycle record
+        cycle_query = None
+        cycle_params = None
         
-        for idx, barcode_item in enumerate(validated_barcodes):
-            barcode_id = barcode_item["barcode_id"]
-            pickup_weight = barcode_item["pickup_weight"]
-            bagtype = barcode_item["bagtype"]
+        if cycle_id:
+            cycle_query = """
+                SELECT id, cycle_id, barcode_id, branch_code, route_id, pickup_weight,
+                       inbound_weight, status, picked_at, inbound_at, sorted_at,
+                       completed_at, created_at
+                FROM pickup_bag_cycle
+                WHERE id = %s AND status != 'completed'
+            """
+            cycle_params = (cycle_id,)
+        else:
+            cycle_query = """
+                SELECT id, cycle_id, barcode_id, branch_code, route_id, pickup_weight,
+                       inbound_weight, status, picked_at, inbound_at, sorted_at,
+                       completed_at, created_at
+                FROM pickup_bag_cycle
+                WHERE barcode_id = %s AND status != 'completed'
+                ORDER BY id DESC
+                LIMIT 1
+            """
+            cycle_params = (barcode_id,)
+        
+        cycle_result = execute_query(cycle_query, cycle_params, fetch_one=True)
+        
+        if not cycle_result.get("success"):
+            return jsonify(
+                {"status": "error", "message": "Database error occurred"}
+            ), 500
+        
+        if not cycle_result.get("data"):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Active cycle not found for the provided barcode_id or cycle_id"
+                }
+            ), 404
+        
+        cycle_data = cycle_result.get("data")
+        current_status = cycle_data.get("status")
+        cycle_db_id = cycle_data.get("id")
+        route_id = cycle_data.get("route_id")
+        branch_code = cycle_data.get("branch_code")
+        
+        print(f"🔍 [scan_and_record_inbound_weight] Found cycle: id={cycle_db_id}, status={current_status}, route_id={route_id}, branch_code={branch_code}")
+        
+        # Validate status transition (allow 'picked' -> 'inbound' or update existing 'inbound')
+        if current_status not in ["picked", "inbound"]:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": f"Invalid status transition. Current status: {current_status}. Can only update from 'picked' or 'inbound' status."
+                }
+            ), 400
+        
+        # Update pickup_bag_cycle
+        update_cycle_query = """
+            UPDATE pickup_bag_cycle
+            SET inbound_weight = %s, status = 'inbound', inbound_at = NOW()
+            WHERE id = %s
+        """
+        update_cycle_result = execute_query(update_cycle_query, (inbound_weight, cycle_db_id))
+        
+        if not update_cycle_result.get("success"):
+            return jsonify(
+                {"status": "error", "message": "Failed to update pickup_bag_cycle"}
+            ), 500
+        
+        print(f"✅ [scan_and_record_inbound_weight] Updated pickup_bag_cycle: id={cycle_db_id}, inbound_weight={inbound_weight}")
+        
+        # Update b2b_route_stops if route_id is available
+        route_stop_data = None
+        if route_id:
+            # Find the route_stop record by route_id and branch_code (to handle multiple stops)
+            find_route_stop_query = """
+                SELECT id, route_id, sequence, branch_code, status, inbound_weight
+                FROM b2b_route_stops
+                WHERE route_id = %s AND branch_code = %s
+                ORDER BY id DESC
+                LIMIT 1
+            """
+            find_route_stop_result = execute_query(
+                find_route_stop_query, (route_id, branch_code), fetch_one=True
+            )
             
-            try:
-                # Validate barcode (auto-register if not found)
-                barcode_check = """
-                    SELECT id, barcode_id, bagtype FROM barcode_master_table
-                    WHERE barcode_id = %s AND is_active = 1
+            if find_route_stop_result.get("success") and find_route_stop_result.get("data"):
+                route_stop_id = find_route_stop_result.get("data").get("id")
+                
+                # Update b2b_route_stops
+                update_route_stop_query = """
+                    UPDATE b2b_route_stops
+                    SET inbound_weight = %s, status = 'inbound', updated_at = NOW()
+                    WHERE id = %s
                 """
-                barcode_result = execute_query(barcode_check, (barcode_id,), fetch_one=True)
-                
-                if not barcode_result.get("success"):
-                    results.append({
-                        "barcode_id": barcode_id,
-                        "success": False,
-                        "error": "Database error occurred",
-                        "error_code": "DATABASE_ERROR"
-                    })
-                    continue
-                
-                # Auto-register barcode if not found
-                if not barcode_result.get("data"):
-                    print(f"⚠️ [batch_scan_and_start] Barcode not found, auto-registering: {barcode_id}")
-                    insert_barcode_query = """
-                        INSERT INTO barcode_master_table (barcode_id, bagtype, is_active, created_at)
-                        VALUES (%s, %s, 1, NOW())
-                    """
-                    insert_barcode_result = execute_query(insert_barcode_query, (barcode_id, bagtype))
-                    
-                    if not insert_barcode_result.get("success"):
-                        results.append({
-                            "barcode_id": barcode_id,
-                            "success": False,
-                            "error": f"Failed to register barcode: {insert_barcode_result.get('error')}",
-                            "error_code": "REGISTRATION_FAILED"
-                        })
-                        continue
-                    
-                    print(f"✅ [batch_scan_and_start] Barcode auto-registered: {barcode_id}")
-                
-                # Check for existing active cycle
-                existing_check = """
-                    SELECT id FROM pickup_bag_cycle
-                    WHERE barcode_id = %s AND status != 'completed'
-                """
-                existing_result = execute_query(existing_check, (barcode_id,), fetch_one=True)
-                
-                if existing_result.get("success") and existing_result.get("data"):
-                    results.append({
-                        "barcode_id": barcode_id,
-                        "success": False,
-                        "error": "Active cycle already exists for this barcode",
-                        "error_code": "DUPLICATE_CYCLE"
-                    })
-                    continue
-                
-                # Generate cycle_id
-                barcode_suffix = barcode_id[:8] if len(barcode_id) >= 8 else barcode_id
-                cycle_id = f"CYCLE_{date_str}_{barcode_suffix}"
-                
-                # Save to b2b_route_stops if route_id is available (only for first barcode to avoid duplicates)
-                # Store total weight of all barcodes in route_stops
-                stop_id = None
-                if route_id and idx == 0 and not route_stop_created and latitude and longitude:
-                    try:
-                        sequence_query = """
-                            SELECT COALESCE(MAX(sequence), 0) + 1 as next_sequence
-                            FROM b2b_route_stops
-                            WHERE route_id = %s
-                        """
-                        seq_result = execute_query(sequence_query, (route_id,), fetch_one=True)
-                        if seq_result.get("success") and seq_result.get("data"):
-                            sequence = seq_result.get("data").get("next_sequence", 1)
-                        else:
-                            sequence = 1
-                        
-                        # Insert route stop with total weight (sum of all barcode weights)
-                        stop_insert_query = """
-                            INSERT INTO b2b_route_stops (
-                                route_id, sequence, latitude, longitude, branch_name, 
-                                address, contact, branch_code, weight, status, created_at, updated_at
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW(), NOW())
-                        """
-                        stop_insert_result = execute_query(
-                            stop_insert_query, 
-                            (route_id, sequence, latitude, longitude, branch_name, address, contact, branch_code, total_weight)
-                        )
-                        
-                        if stop_insert_result.get("success"):
-                            stop_id = stop_insert_result.get("data")
-                            route_stop_id = stop_id
-                            route_stop_created = True
-                            print(f"[batch_scan_and_start] Saved to b2b_route_stops: stop_id={stop_id}, total_weight={total_weight} kg")
-                    except Exception as e:
-                        print(f"[batch_scan_and_start] Error saving to b2b_route_stops: {str(e)}")
-                
-                # Insert into pickup_bag_cycle
-                insert_query = """
-                    INSERT INTO pickup_bag_cycle (
-                        cycle_id, barcode_id, branch_code, pickup_weight, route_id,
-                        status, picked_at, created_at
-                    ) VALUES (%s, %s, %s, %s, %s, 'picked', NOW(), NOW())
-                """
-                insert_result = execute_query(
-                    insert_query, (cycle_id, barcode_id, branch_code, pickup_weight, route_id)
+                update_route_stop_result = execute_query(
+                    update_route_stop_query, (inbound_weight, route_stop_id)
                 )
                 
-                if not insert_result.get("success"):
-                    results.append({
-                        "barcode_id": barcode_id,
-                        "success": False,
-                        "error": f"Failed to start pickup cycle: {insert_result.get('error')}",
-                        "error_code": "CYCLE_CREATION_FAILED"
-                    })
-                    continue
-                
-                cycle_db_id = insert_result.get("data")
-                
-                # Get the created cycle
-                get_query = """
-                    SELECT id, cycle_id, barcode_id, branch_code, pickup_weight, route_id,
-                           inbound_weight, status, picked_at, inbound_at, sorted_at,
-                           completed_at, created_at
-                    FROM pickup_bag_cycle
-                    WHERE id = %s
-                """
-                get_result = execute_query(get_query, (cycle_db_id,), fetch_one=True)
-                cycle_data = get_result.get("data") if get_result.get("success") else None
-                
-                results.append({
-                    "barcode_id": barcode_id,
-                    "success": True,
-                    "cycle_id": cycle_id,
-                    "cycle_db_id": cycle_db_id,
-                    "data": cycle_data,
-                    "message": "Cycle created successfully"
-                })
-                
-            except Exception as e:
-                print(f"❌ [batch_scan_and_start] Error processing barcode {barcode_id}: {str(e)}")
-                results.append({
-                    "barcode_id": barcode_id,
-                    "success": False,
-                    "error": f"Error processing barcode: {str(e)}",
-                    "error_code": "PROCESSING_ERROR"
-                })
-        
-        # Calculate summary
-        total = len(results)
-        successful = sum(1 for r in results if r.get("success"))
-        failed = total - successful
-        
-        # Calculate actual total weight from successfully processed barcodes
-        # This ensures route_stops weight matches only successful barcodes
-        successful_weight = 0.0
-        for result in results:
-            if result.get("success"):
-                # Find the corresponding barcode weight
-                barcode_id = result.get("barcode_id")
-                matching_barcode = next((b for b in validated_barcodes if b["barcode_id"] == barcode_id), None)
-                if matching_barcode:
-                    successful_weight += matching_barcode["pickup_weight"]
-        
-        # Update route_stops weight with actual successful weight if route stop was created
-        if route_stop_id and route_stop_created:
-            try:
-                update_weight_query = """
-                    UPDATE b2b_route_stops 
-                    SET weight = %s, updated_at = NOW()
-                    WHERE id = %s
-                """
-                update_result = execute_query(update_weight_query, (successful_weight, route_stop_id))
-                if update_result.get("success"):
-                    print(f"[batch_scan_and_start] Updated route_stops weight to {successful_weight} kg (from {successful} successful barcodes)")
+                if update_route_stop_result.get("success"):
+                    # Get updated route_stop data
+                    get_route_stop_query = """
+                        SELECT id, route_id, sequence, branch_code, status, inbound_weight, updated_at
+                        FROM b2b_route_stops
+                        WHERE id = %s
+                    """
+                    get_route_stop_result = execute_query(
+                        get_route_stop_query, (route_stop_id,), fetch_one=True
+                    )
+                    if get_route_stop_result.get("success"):
+                        route_stop_data = get_route_stop_result.get("data")
+                    print(f"✅ [scan_and_record_inbound_weight] Updated b2b_route_stops: id={route_stop_id}, inbound_weight={inbound_weight}")
                 else:
-                    print(f"[batch_scan_and_start] Failed to update route_stops weight: {update_result.get('error')}")
-            except Exception as e:
-                print(f"[batch_scan_and_start] Error updating route_stops weight: {str(e)}")
-        
-        # Determine overall status
-        if successful == total:
-            status = "success"
-            message = f"Successfully processed all {total} barcodes. Total weight: {successful_weight} kg"
-        elif successful > 0:
-            status = "partial_success"
-            message = f"Processed {successful} of {total} barcodes successfully. Total weight: {successful_weight} kg"
+                    print(f"⚠️ [scan_and_record_inbound_weight] Failed to update b2b_route_stops: {update_route_stop_result.get('error')}")
+            else:
+                print(f"⚠️ [scan_and_record_inbound_weight] No matching b2b_route_stops found for route_id={route_id}, branch_code={branch_code}")
         else:
-            status = "error"
-            message = f"Failed to process all {total} barcodes"
+            print(f"⚠️ [scan_and_record_inbound_weight] No route_id in cycle, skipping b2b_route_stops update")
         
-        return jsonify({
-            "status": status,
-            "message": message,
-            "summary": {
-                "total": total,
-                "successful": successful,
-                "failed": failed,
-                "total_weight": successful_weight
-            },
-            "results": results
-        }), 200 if successful > 0 else 400
+        # Get updated cycle data
+        get_updated_cycle_query = """
+            SELECT id, cycle_id, barcode_id, branch_code, route_id, pickup_weight,
+                   inbound_weight, status, picked_at, inbound_at, sorted_at,
+                   completed_at, created_at
+            FROM pickup_bag_cycle
+            WHERE id = %s
+        """
+        get_updated_cycle_result = execute_query(
+            get_updated_cycle_query, (cycle_db_id,), fetch_one=True
+        )
         
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"❌ [batch_scan_and_start] Exception occurred: {str(e)}")
-        print(f"❌ [batch_scan_and_start] Traceback: {error_trace}")
+        updated_cycle_data = None
+        if get_updated_cycle_result.get("success"):
+            updated_cycle_data = get_updated_cycle_result.get("data")
+        
         return jsonify(
-            {"status": "error", "message": f"Error in batch scan and start cycle: {str(e)}"}
+            {
+                "status": "success",
+                "message": "Inbound weight recorded successfully",
+                "data": {
+                    "cycle": updated_cycle_data,
+                    "route_stop": route_stop_data,
+                }
+            }
+        )
+    except Exception as e:
+        print(f"❌ [scan_and_record_inbound_weight] Exception: {str(e)}")
+        import traceback
+        print(f"❌ [scan_and_record_inbound_weight] Traceback: {traceback.format_exc()}")
+        return jsonify(
+            {"status": "error", "message": f"Error recording inbound weight: {str(e)}"}
         ), 500
 
 # ==================== END BARCODE SCANNER API ENDPOINTS ====================
@@ -4660,13 +2984,59 @@ def print_registered_routes():
     else:
         print("✅ Barcode routes are registered correctly!")
 
+# Global error handler for unhandled exceptions
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Global exception handler to log all unhandled errors"""
+    import traceback
+    error_trace = traceback.format_exc()
+    error_info = {
+        "error_type": type(e).__name__,
+        "error_message": str(e),
+        "traceback": error_trace,
+        "request_method": request.method,
+        "request_path": request.path,
+        "request_data": request.get_json() if request.is_json else None,
+        "request_args": dict(request.args),
+    }
+    
+    log_request_error("GLOBAL_ERROR_HANDLER", e, error_info)
+    logger.error(f"Unhandled exception: {error_info}")
+    
+    return jsonify({
+        "status": "error",
+        "message": f"Internal server error: {str(e)}",
+        "error_type": type(e).__name__,
+        "details": "Check server logs (app.log) and console for full error details"
+    }), 500
+
+# Request logging middleware
+@app.before_request
+def log_request_info():
+    """Log all incoming requests for debugging"""
+    if request.method in ['POST', 'PUT', 'PATCH']:
+        try:
+            request_data = request.get_json() if request.is_json else None
+            logger.info(f"Request: {request.method} {request.path}")
+            if request_data:
+                # Log request data but mask sensitive fields
+                masked_data = {}
+                for key, value in request_data.items():
+                    if 'password' in key.lower() or 'token' in key.lower():
+                        masked_data[key] = "***MASKED***"
+                    else:
+                        masked_data[key] = value
+                logger.info(f"Request Data: {masked_data}")
+                print(f"🔍 [REQUEST] {request.method} {request.path} - Data: {masked_data}")
+        except Exception as e:
+            logger.warning(f"Failed to log request data: {e}")
+
 # Print routes when module loads
 print_registered_routes()
 
 if __name__ == "__main__":
-    print("\n🚀 Starting Flask server...")
-    print("📍 Barcode endpoints should be available at:")
-    print("   POST /aiml/corporatewebsite/barcode/scan")
-    print("   GET  /aiml/corporatewebsite/barcode/test")
-    print("   GET  /aiml/corporatewebsite/debug/routes\n")
+    logger.info("Starting Flask application...")
+    logger.info(f"Database Config - Host: {app.config['MYSQL_HOST']}, Port: {app.config['MYSQL_PORT']}, DB: {app.config['MYSQL_DB']}")
+    print(f"📝 Logging to file: app.log")
+    print(f"📝 Check app.log file for detailed error logs")
     app.run(debug=True, host="0.0.0.0", port=5000)
